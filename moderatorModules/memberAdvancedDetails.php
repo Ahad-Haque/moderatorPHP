@@ -1,4 +1,5 @@
 <?php
+// moderatorModules\memberAdvancedDetails.php
 // Check if user is logged in
 if (!isset($_SESSION['loggedin'])) {
     header("Location: ../moderator.php");

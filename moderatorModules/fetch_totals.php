@@ -1,4 +1,5 @@
 <?php
+// moderatorModules\fetch_totals.php
 session_start();
 header('Content-Type: application/json');
 

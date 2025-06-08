@@ -1,4 +1,5 @@
 <?php
+// moderatorModules\loadingModule.php
 // loadingModule.php
 function insertLoadingStyles() {
     ?>

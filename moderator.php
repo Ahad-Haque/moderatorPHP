@@ -1,4 +1,5 @@
 <?php
+// moderator.php
 // Start session management
 session_start();
 
