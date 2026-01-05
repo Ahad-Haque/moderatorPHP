@@ -13,6 +13,89 @@ if (!isset($_GET['id'])) {
 
 $member_id = $_GET['id'];
 
+// --- 1. HANDLE FORM SUBMISSION (Placed before fetching data so page shows updated info) ---
+if (isset($_POST['update'])) {
+    
+    // A. Handle Status/Resignation Update
+    if (isset($_POST['resign_status'])) {
+        $status = $_POST['resign_status'];
+        $resign_date = $_POST['resign_date']; // Get the date from post
+
+        if ($status === 'active') {
+            // Set resign_date to NULL
+            $status_sql = "UPDATE memberBasicDetails SET resign_date = NULL WHERE id_no = ?";
+            $stmt = $conn->prepare($status_sql);
+            $stmt->bind_param("s", $member_id);
+            $stmt->execute();
+        } elseif ($status === 'retired' && !empty($resign_date)) {
+            // Set resign_date to the selected date
+            $status_sql = "UPDATE memberBasicDetails SET resign_date = ? WHERE id_no = ?";
+            $stmt = $conn->prepare($status_sql);
+            $stmt->bind_param("ss", $resign_date, $member_id);
+            $stmt->execute();
+        }
+    }
+
+    // B. Handle Financial Table Updates (Existing Logic)
+    $table_name = str_replace('-', '_', $member_id);
+    
+    // Ensure table exists (Keep your existing table creation logic)
+    $result = $conn->query("SHOW TABLES LIKE '$table_name'");
+    if ($result->num_rows == 0) {
+        $create_table_sql = "CREATE TABLE $table_name (
+            No INT AUTO_INCREMENT PRIMARY KEY,
+            Submission_Date DATE NOT NULL,
+            Share DECIMAL(10,2) DEFAULT 0.00,
+            Deposit DECIMAL(10,2) DEFAULT 0.00,
+            Land_Advance DECIMAL(10,2) DEFAULT 0.00,
+            Soil_Test DECIMAL(10,2) DEFAULT 0.00,
+            Boundary DECIMAL(10,2) DEFAULT 0.00,
+            Others DECIMAL(10,2) DEFAULT 0.00,
+            Total DECIMAL(10,2) GENERATED ALWAYS AS 
+                (Share + Deposit + Land_Advance + Soil_Test + Boundary + Others) STORED
+        )";
+        $conn->query($create_table_sql);
+    }
+
+    // Handle updates for existing rows and insertion of new rows
+    if(isset($_POST['rows']) && is_array($_POST['rows'])) {
+        foreach($_POST['rows'] as $row) {
+            // Only process if Submission Date is set (prevents empty rows)
+            if(empty($row['Submission_Date'])) continue;
+
+            if(isset($row['No']) && $row['No'] != '' && is_numeric($row['No'])) {
+                // Update existing row
+                $update_sql = "UPDATE $table_name SET 
+                    Submission_Date = ?, Share = ?, Deposit = ?, Land_Advance = ?, 
+                    Soil_Test = ?, Boundary = ?, Others = ? WHERE No = ?";
+                $stmt = $conn->prepare($update_sql);
+                $stmt->bind_param("sddddddi", 
+                    $row['Submission_Date'], $row['Share'], $row['Deposit'], 
+                    $row['Land_Advance'], $row['Soil_Test'], $row['Boundary'], 
+                    $row['Others'], $row['No']
+                );
+                $stmt->execute();
+            } else {
+                // Insert new row
+                $insert_sql = "INSERT INTO $table_name 
+                    (Submission_Date, Share, Deposit, Land_Advance, Soil_Test, Boundary, Others)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)";
+                $stmt = $conn->prepare($insert_sql);
+                $stmt->bind_param("sdddddd", 
+                    $row['Submission_Date'], $row['Share'], $row['Deposit'], 
+                    $row['Land_Advance'], $row['Soil_Test'], $row['Boundary'], $row['Others']
+                );
+                $stmt->execute();
+            }
+        }
+    }
+    
+    // Redirect to refresh page and avoid form resubmission
+    echo "<script>window.location.href = window.location.href;</script>";
+    exit();
+}
+
+// --- 2. FETCH DATA ---
 // Get member basic details
 $sql = "SELECT * FROM memberBasicDetails WHERE id_no = ?";
 $stmt = $conn->prepare($sql);
@@ -20,7 +103,6 @@ $stmt->bind_param("s", $member_id);
 $stmt->execute();
 $basic_result = $stmt->get_result();
 $member_data = $basic_result->fetch_assoc();
-
 
 function calculateMembershipDuration($admit_date, $resign_date) {
     $admit = new DateTime($admit_date);
@@ -37,7 +119,7 @@ if($result->num_rows > 0) {
     $table_exists = true;
 }
 
-// After getting member data
+// Calculate logic for service charge
 $show_service_charge = false;
 if($member_data['resign_date']) {
     $duration = calculateMembershipDuration($member_data['admit_date'], $member_data['resign_date']);
@@ -46,113 +128,33 @@ if($member_data['resign_date']) {
 
 // Handle Delete Action
 if (isset($_GET['action']) && $_GET['action'] === 'delete') {
-    // Prevent any output before JSON response
     ob_clean();
-    
-    // Start transaction
     $conn->begin_transaction();
-    
     try {
-        // Delete from memberBasicDetails first
         $delete_member_sql = "DELETE FROM memberBasicDetails WHERE id_no = ?";
         $stmt = $conn->prepare($delete_member_sql);
         $stmt->bind_param("s", $member_id);
         $stmt->execute();
         
-        // Check if the member-specific table exists and delete it
-        $table_name = str_replace('-', '_', $member_id);
         $drop_table_sql = "DROP TABLE IF EXISTS $table_name";
         $conn->query($drop_table_sql);
         
-        // If everything is successful, commit the transaction
         $conn->commit();
-        
-        // Ensure headers are set correctly
         header('Content-Type: application/json');
         echo json_encode(['success' => true]);
         exit();
-        
     } catch (Exception $e) {
-        // If there's an error, rollback the transaction
         $conn->rollback();
-        
         header('Content-Type: application/json');
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
         exit();
     }
 }
 
-// Handle form submissions
-if(isset($_POST['update'])) {
-    if(!$table_exists) {
-        // Create table if it doesn't exist
-        $create_table_sql = "CREATE TABLE $table_name (
-            No INT AUTO_INCREMENT PRIMARY KEY,
-            Submission_Date DATE NOT NULL,
-            Share DECIMAL(10,2) DEFAULT 0.00,
-            Deposit DECIMAL(10,2) DEFAULT 0.00,
-            Land_Advance DECIMAL(10,2) DEFAULT 0.00,
-            Soil_Test DECIMAL(10,2) DEFAULT 0.00,
-            Boundary DECIMAL(10,2) DEFAULT 0.00,
-            Others DECIMAL(10,2) DEFAULT 0.00,
-            Total DECIMAL(10,2) GENERATED ALWAYS AS 
-                (Share + Deposit + Land_Advance + Soil_Test + Boundary + Others) STORED
-        )";
-        $conn->query($create_table_sql);
-        $table_exists = true;
-    }
-
-    // Handle updates for existing rows and insertion of new rows
-    if(isset($_POST['rows']) && is_array($_POST['rows'])) {
-        foreach($_POST['rows'] as $row) {
-            if(isset($row['No']) && $row['No'] != '') {
-                // Update existing row
-                $update_sql = "UPDATE $table_name SET 
-                    Submission_Date = ?,
-                    Share = ?,
-                    Deposit = ?,
-                    Land_Advance = ?,
-                    Soil_Test = ?,
-                    Boundary = ?,
-                    Others = ?
-                    WHERE No = ?";
-                $stmt = $conn->prepare($update_sql);
-                $stmt->bind_param("sddddddi", 
-                    $row['Submission_Date'],
-                    $row['Share'],
-                    $row['Deposit'],
-                    $row['Land_Advance'],
-                    $row['Soil_Test'],
-                    $row['Boundary'],
-                    $row['Others'],
-                    $row['No']
-                );
-                $stmt->execute();
-            } else {
-                // Insert new row
-                $insert_sql = "INSERT INTO $table_name 
-                    (Submission_Date, Share, Deposit, Land_Advance, Soil_Test, Boundary, Others)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)";
-                $stmt = $conn->prepare($insert_sql);
-                $stmt->bind_param("sdddddd", 
-                    $row['Submission_Date'],
-                    $row['Share'],
-                    $row['Deposit'],
-                    $row['Land_Advance'],
-                    $row['Soil_Test'],
-                    $row['Boundary'],
-                    $row['Others']
-                );
-                $stmt->execute();
-            }
-        }
-    }
-}
-
-// Fetch existing data
+// Fetch existing transaction data
 $details_data = [];
 if($table_exists) {
-    $sql = "SELECT * FROM $table_name ORDER BY No ASC";
+    $sql = "SELECT * FROM $table_name ORDER BY Submission_Date ASC, No ASC";
     $result = $conn->query($sql);
     while($row = $result->fetch_assoc()) {
         $details_data[] = $row;
@@ -161,314 +163,74 @@ if($table_exists) {
 ?>
 
 <style>
-    /* General table styling */
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 20px;
-        background-color: white;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    th, td {
-        border: 1px solid #ddd;
-        padding: 12px;
-        text-align: left;
-    }
-    th {
-        background-color: #f2f2f2;
-        font-weight: bold;
-        color: #333;
-    }
-    tr:nth-child(even) {
-        background-color: #f9f9f9;
-    }
-    tr:hover {
-        background-color: #f5f5f5;
-    }
-
-    /* Member details section */
-    .member-details {
-        background-color: white;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        padding: 25px;
-        margin: 20px 0;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .member-details h3 {
-        margin-top: 0;
-        color: #333;
-        border-bottom: 2px solid #007bff;
-        padding-bottom: 10px;
-        margin-bottom: 20px;
-    }
-    .member-details p {
-        margin: 10px 0;
-        line-height: 1.6;
-    }
-    .member-details strong {
-        color: #444;
-        width: 150px;
-        display: inline-block;
-    }
-
-    /* Input fields */
-    input[type="date"],
-    input[type="number"] {
-        width: 100%;
-        padding: 8px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        box-sizing: border-box;
-    }
-    input[type="number"]:focus,
-    input[type="date"]:focus {
-        border-color: #007bff;
-        outline: none;
-        box-shadow: 0 0 5px rgba(0,123,255,0.2);
-    }
-
-    /* Buttons */
-    .add-row {
-        background-color: #f8f9fa;
-        border: 2px dashed #007bff;
-        color: #007bff;
-        padding: 15px;
-        margin: 20px 0;
-        border-radius: 4px;
-        cursor: pointer;
-        text-align: center;
-        font-size: 18px;
-        transition: all 0.3s ease;
-    }
+    /* Kept your existing styles */
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+    th { background-color: #f2f2f2; font-weight: bold; color: #333; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    tr:hover { background-color: #f5f5f5; }
+    .member-details { background-color: white; border: 1px solid #ddd; border-radius: 4px; padding: 25px; margin: 20px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .member-details h3 { margin-top: 0; color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; margin-bottom: 20px; }
+    .member-details p { margin: 10px 0; line-height: 1.6; display: flex; align-items: center; } /* Added flex for alignment */
+    .member-details strong { color: #444; width: 150px; display: inline-block; }
+    input[type="date"], input[type="number"], select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; } /* Added select */
+    input[type="number"]:focus, input[type="date"]:focus, select:focus { border-color: #007bff; outline: none; box-shadow: 0 0 5px rgba(0,123,255,0.2); }
+    .add-row { background-color: #f8f9fa; border: 2px dashed #007bff; color: #007bff; padding: 15px; margin: 20px 0; border-radius: 4px; cursor: pointer; text-align: center; font-size: 18px; transition: all 0.3s ease; }
+    .column-totals { background-color: #f2f2f2; font-weight: bold; }
+    .col-total { color: #28a745; }
+    .add-row:hover { background-color: #e9ecef; transform: translateY(-1px); }
+    .print-btn { float: right; background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
+    .print-btn:hover { background-color: #218838; }
+    .update-btn { background-color: #28a745; color: white; padding: 12px 25px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 20px; transition: background-color 0.3s ease; }
+    .update-btn:hover { background-color: #218838; }
+    .back-btn { background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-bottom: 20px; transition: background-color 0.3s ease; }
+    .back-btn:hover { background-color: #0056b3; text-decoration: none; color: white; }
+    .delete-btn { background-color: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; float: right; font-size: 16px; transition: background-color 0.3s ease; }
+    .delete-btn:hover { background-color: #c82333; }
+    .total { font-weight: bold; background-color: #f8f9fa; color: #28a745; }
     
-    .column-totals {
-        background-color: #f2f2f2;
-        font-weight: bold;
-    }
-    .col-total {
-        color: #28a745;
-    }
-    .add-row:hover {
-        background-color: #e9ecef;
-        transform: translateY(-1px);
-    }
-
-    .print-btn {
-        float: right;
-        background-color: #28a745;
-        color: white;
-        padding: 10px 20px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        margin-bottom: 20px;
-    }
-    .print-btn:hover {
-        background-color: #218838;
-    }
-
-    .update-btn {
-        background-color: #28a745;
-        color: white;
-        padding: 12px 25px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 16px;
-        margin-top: 20px;
-        transition: background-color 0.3s ease;
-    }
-    .update-btn:hover {
-        background-color: #218838;
-    }
-
-    .back-btn {
-        background-color: #007bff;
-        color: white;
-        padding: 10px 20px;
-        text-decoration: none;
-        border-radius: 4px;
-        display: inline-block;
-        margin-bottom: 20px;
-        transition: background-color 0.3s ease;
-    }
-    .back-btn:hover {
-        background-color: #0056b3;
-        text-decoration: none;
-        color: white;
-    }
-
-    .delete-btn {
-        background-color: #dc3545;
-        color: white;
-        padding: 10px 20px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        float: right;
-        font-size: 16px;
-        transition: background-color 0.3s ease;
-    }
-    .delete-btn:hover {
-        background-color: #c82333;
-    }
-
-    /* Total column */
-    .total {
-        font-weight: bold;
-        background-color: #f8f9fa;
-        color: #28a745;
-    }
-
-    /* Responsive design */
-    @media screen and (max-width: 1024px) {
-        .member-details {
-            padding: 15px;
-        }
-        th, td {
-            padding: 8px;
-        }
-    }
-
-    /* Print styles */
+    /* New styles for status dropdown */
+    .status-container { display: inline-flex; align-items: center; gap: 10px; }
+    .status-select { padding: 5px; border-radius: 4px; border: 1px solid #ddd; }
+    
+    @media screen and (max-width: 1024px) { .member-details { padding: 15px; } th, td { padding: 8px; } }
     @media print {
-        /* Hide non-printable elements */
-        .back-btn, 
-        .print-btn, 
-        .add-row, 
-        .update-btn,
-        .delete-btn {
-            display: none;
-        }
-        .logout-btn,    /* Added this */
-        .page-link {    /* Added this for links */
-            display: none !important;
-        }
-
-        /* Reset styles for printing */
-        body {
-            padding: 0;
-            margin: 0;
-        }
-
-        .member-details,
-        .container {
-            padding: 10px;
-            margin: 0;
-            box-shadow: none;
-        }
-
-        /* Table styles for print */
-        table {
-            width: 100%;
-            page-break-inside: auto;
-            border-collapse: collapse;
-            box-shadow: none;
-        }
-
-        tr {
-            page-break-inside: avoid;
-            page-break-after: auto;
-        }
-
-        th {
-            background-color: #f2f2f2 !important;
-            -webkit-print-color-adjust: exact;
-            color-adjust: exact;
-        }
-
-        td, th {
-            border: 1px solid #000 !important;
-            padding: 8px;
-        }
-
-        /* Header for each printed page */
-        .member-details {
-            position: relative;
-            page-break-inside: avoid;
-        }
-
-        /* Footer for each printed page */
-        @page {
-            size: landscape;
-            margin: 20mm;
-        }
-
-        /* Make text black for better printing */
-        * {
-            color: black !important;
-        }
-
-        /* Number formatting */
-        td[data-value] {
-            text-align: right;
-        }
-
-        /* Column totals row */
-        .column-totals {
-            font-weight: bold;
-            background-color: #f2f2f2 !important;
-            -webkit-print-color-adjust: exact;
-            color-adjust: exact;
-        }
-
-        /* Remove hover effects */
-        tr:hover {
-            background-color: transparent;
-        }
-
-        /* Ensure input values are visible */
-        input {
-            border: none;
-            padding: 0;
-            margin: 0;
-            width: auto;
-        }
-
-        input[type="date"],
-        input[type="number"] {
-            -webkit-appearance: none;
-            margin: 0;
-            padding: 0;
-            border: none;
-            background: transparent;
-        }
-        
-        tfoot {
-        display: table-footer-group;
-        }
-
-        /* Hide page links/URLs */
-        @page {
-            margin: 20mm;
-            size: landscape;
-        }
-    
-        /* Remove URLs from printing */
-        a[href]:after {
-            content: none !important;
-        }
-    
-        /* Force column totals to stay together */
-        .column-totals {
-            break-inside: avoid;
-        }
-        
-        /* Hide any system-generated URLs */
-        a {
-            text-decoration: none;
-        }
+        .back-btn, .print-btn, .add-row, .update-btn, .delete-btn, .status-select { display: none !important; }
+        .print-status-text { display: inline-block !important; }
+        .logout-btn, .page-link { display: none !important; }
+        body { padding: 0; margin: 0; }
+        .member-details, .container { padding: 10px; margin: 0; box-shadow: none; }
+        table { width: 100%; page-break-inside: auto; border-collapse: collapse; box-shadow: none; }
+        tr { page-break-inside: avoid; page-break-after: auto; }
+        th { background-color: #f2f2f2 !important; -webkit-print-color-adjust: exact; color-adjust: exact; }
+        td, th { border: 1px solid #000 !important; padding: 8px; }
+        .member-details { position: relative; page-break-inside: avoid; }
+        @page { size: landscape; margin: 20mm; }
+        * { color: black !important; }
+        td[data-value] { text-align: right; }
+        .column-totals { font-weight: bold; background-color: #f2f2f2 !important; -webkit-print-color-adjust: exact; color-adjust: exact; }
+        tr:hover { background-color: transparent; }
+        input { border: none; padding: 0; margin: 0; width: auto; }
+        input[type="date"], input[type="number"] { -webkit-appearance: none; margin: 0; padding: 0; border: none; background: transparent; }
+        tfoot { display: table-footer-group; }
+        a[href]:after { content: none !important; }
+        .column-totals { break-inside: avoid; }
+        a { text-decoration: none; }
     }
+    
+    /* Utility class for print */
+    .print-status-text { display: none; }
 </style>
 
 <a href="moderator.php?module=userDetails" class="back-btn">← Back</a>
 
 <button class="delete-btn" onclick="confirmDelete()">Delete Member</button>
 
+<form id="detailsForm" method="POST">
+
 <div class="member-details">
     <h3>Member Basic Information</h3>
-    <button onclick="window.print()" class="print-btn">Print</button>
+    <button type="button" onclick="window.print()" class="print-btn">Print</button>
     <p><strong>ID:</strong> <?php echo htmlspecialchars($member_data['id_no']); ?></p>
     <p><strong>Name:</strong> <?php echo htmlspecialchars($member_data['name']); ?></p>
     <p><strong>Designation:</strong> <?php echo htmlspecialchars($member_data['designation']); ?></p>
@@ -476,10 +238,29 @@ if($table_exists) {
     <p><strong>Address:</strong> <?php echo htmlspecialchars($member_data['address']); ?></p>
     <p><strong>Mobile No:</strong> <?php echo htmlspecialchars($member_data['mobile_no']); ?></p>
     <p><strong>Admit Date:</strong> <?php echo htmlspecialchars($member_data['admit_date']); ?></p>
-    <p><strong>Status:</strong> <?php echo $member_data['resign_date'] ? 'Resigned on ' . htmlspecialchars($member_data['resign_date']) : 'Active'; ?></p>
+    
+    <p>
+        <strong>Status:</strong> 
+        
+        <span class="status-container">
+            <select name="resign_status" id="resignStatus" class="status-select" onchange="toggleStatusDate()">
+                <option value="active" <?php echo $member_data['resign_date'] ? '' : 'selected'; ?>>Active</option>
+                <option value="retired" <?php echo $member_data['resign_date'] ? 'selected' : ''; ?>>Retired</option>
+            </select>
+            
+            <span id="dateContainer" style="display: <?php echo $member_data['resign_date'] ? 'inline' : 'none'; ?>;">
+                on 
+                <input type="date" name="resign_date" id="resignDate" 
+                       value="<?php echo $member_data['resign_date'] ? $member_data['resign_date'] : ''; ?>">
+            </span>
+        </span>
+
+        <span class="print-status-text">
+            <?php echo $member_data['resign_date'] ? 'Resigned on ' . htmlspecialchars($member_data['resign_date']) : 'Active'; ?>
+        </span>
+    </p>
 </div>
 
-<form id="detailsForm" method="POST">
     <table>
         <thead>
             <tr>
@@ -526,7 +307,6 @@ if($table_exists) {
                     <td><input type="number" step="0.01" name="rows[new][Share]" value="0.00" oninput="calculateTotal(this)"></td>
                     <td><input type="number" step="0.01" name="rows[new][Deposit]" value="0.00" oninput="calculateTotal(this)"></td>
                     <?php if($member_data['resign_date'] && $show_service_charge): ?>
-
                         <td class="service-charge">0.00</td>
                         <td class="total-receivable">0.00</td>
                     <?php endif; ?>
@@ -539,7 +319,7 @@ if($table_exists) {
             <?php endif; ?>
         </tbody>
         <tfoot>
-            <tfoot class="column-totals" style="page-break-inside: avoid;">
+            <tr class="column-totals" style="page-break-inside: avoid;">
                 <td><strong>Column Totals</strong></td>
                 <td></td>
                 <td class="col-total" id="share-total">0.00</td>
@@ -562,11 +342,27 @@ if($table_exists) {
 </form>
 
 <script>
+// --- Status/Date Toggle Script ---
+function toggleStatusDate() {
+    const status = document.getElementById('resignStatus').value;
+    const dateContainer = document.getElementById('dateContainer');
+    const dateInput = document.getElementById('resignDate');
+    
+    if (status === 'retired') {
+        dateContainer.style.display = 'inline';
+        dateInput.required = true;
+    } else {
+        dateContainer.style.display = 'none';
+        dateInput.required = false;
+        dateInput.value = ''; // Clear value when switching to active
+    }
+}
+
 function addNewRow() {
     const tbody = document.getElementById('detailsTableBody');
     const newRow = document.createElement('tr');
     const rowIndex = 'new_' + Date.now();
-    const isResigned = document.querySelector('.service-charge') !== null; // Check if member is resigned
+    const isResigned = document.querySelector('.service-charge') !== null;
     
     let rowHTML = `
         <td>New
@@ -581,7 +377,6 @@ function addNewRow() {
                 <td class="service-charge">0.00</td>
                 <td class="total-receivable">0.00</td>`;
         }
-
     
     rowHTML += `
         <td><input type="number" step="0.01" name="rows[${rowIndex}][Land_Advance]" value="0.00" oninput="calculateTotal(this)"></td>
@@ -600,16 +395,23 @@ function calculateTotal(input) {
    const inputs = row.querySelectorAll('input[type="number"]');
    let rowTotal = 0;
    
-   const shareValue = parseFloat(row.querySelector('input[name$="[Share]"]').value) || 0;
-   const depositValue = parseFloat(row.querySelector('input[name$="[Deposit]"]').value) || 0;
-   const landAdvValue = parseFloat(row.querySelector('input[name$="[Land_Advance]"]').value) || 0;
-   const soilTestValue = parseFloat(row.querySelector('input[name$="[Soil_Test]"]').value) || 0;
-   const boundaryValue = parseFloat(row.querySelector('input[name$="[Boundary]"]').value) || 0;
-   const othersValue = parseFloat(row.querySelector('input[name$="[Others]"]').value) || 0;
+   // Safely get values, defaulting to 0
+   const getVal = (name) => {
+       const el = row.querySelector(`input[name$="[${name}]"]`);
+       return el ? (parseFloat(el.value) || 0) : 0;
+   };
+
+   const shareValue = getVal('Share');
+   const depositValue = getVal('Deposit');
+   const landAdvValue = getVal('Land_Advance');
+   const soilTestValue = getVal('Soil_Test');
+   const boundaryValue = getVal('Boundary');
+   const othersValue = getVal('Others');
    
    const serviceChargeCell = row.querySelector('.service-charge');
    const totalReceivableCell = row.querySelector('.total-receivable');
    
+   // Check if service charge cells exist and we should show them
    if (serviceChargeCell && totalReceivableCell && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
        const serviceCharge = (shareValue + depositValue) * 0.2;
        const totalReceivable = (shareValue + depositValue) - serviceCharge;
@@ -635,12 +437,17 @@ function calculateColumnTotals() {
     const rows = document.querySelectorAll('#detailsTableBody tr');
     
     rows.forEach(row => {
-        shareTot += parseFloat(row.querySelector('input[name$="[Share]"]').value) || 0;
-        depositTot += parseFloat(row.querySelector('input[name$="[Deposit]"]').value) || 0;
-        landAdvTot += parseFloat(row.querySelector('input[name$="[Land_Advance]"]').value) || 0;
-        soilTestTot += parseFloat(row.querySelector('input[name$="[Soil_Test]"]').value) || 0;
-        boundaryTot += parseFloat(row.querySelector('input[name$="[Boundary]"]').value) || 0;
-        othersTot += parseFloat(row.querySelector('input[name$="[Others]"]').value) || 0;
+        const getVal = (name) => {
+            const el = row.querySelector(`input[name$="[${name}]"]`);
+            return el ? (parseFloat(el.value) || 0) : 0;
+        };
+
+        shareTot += getVal('Share');
+        depositTot += getVal('Deposit');
+        landAdvTot += getVal('Land_Advance');
+        soilTestTot += getVal('Soil_Test');
+        boundaryTot += getVal('Boundary');
+        othersTot += getVal('Others');
         
         const serviceChargeCell = row.querySelector('.service-charge');
         const totalReceivableCell = row.querySelector('.total-receivable');
@@ -671,22 +478,16 @@ function calculateColumnTotals() {
 async function confirmDelete() {
     if (confirm('Are you sure you want to delete this member? This action cannot be undone!')) {
         try {
-            // Get current URL parameters
             const urlParams = new URLSearchParams(window.location.search);
             const memberId = urlParams.get('id');
             
-            // Make DELETE request as a form submission to avoid JSON parsing issues
             const response = await fetch(`moderator.php?module=memberAdvancedDetails&id=${memberId}&action=delete`, {
                 method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
-                }
+                headers: { 'Accept': 'application/json' }
             });
             
-            // Check if response was successful
             if (response.ok) {
-                // Redirect after successful deletion
-                window.location.href = 'https://shapnachurasociety.com/moderator.php?module=userDetails&deleted=success';
+                window.location.href = 'moderator.php?module=userDetails&deleted=success';
             } else {
                 alert('Error deleting member. Please try again.');
             }
