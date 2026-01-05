@@ -75,13 +75,13 @@ function validateDates($start_date, $end_date) {
 }
 
 // Use it in your AJAX handler:
-try {
-    list($start_date, $end_date) = validateDates($start_date, $end_date);
-    $totals = calculateRangeTotals($conn, $start_date, $end_date);
-    echo json_encode($totals);
-} catch (Exception $e) {
-    echo json_encode(['error' => $e->getMessage()]);
-}
+// try {
+//     list($start_date, $end_date) = validateDates($start_date, $end_date);
+//     $totals = calculateRangeTotals($conn, $start_date, $end_date);
+//     echo json_encode($totals);
+// } catch (Exception $e) {
+//     echo json_encode(['error' => $e->getMessage()]);
+// }
 
 // Function to calculate totals for date range
 function calculateRangeTotals($conn, $start_date, $end_date) {
