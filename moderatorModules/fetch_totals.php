@@ -11,7 +11,7 @@ if (!isset($_SESSION['loggedin'])) {
 
 // Connect to database
 require_once('../wp-load.php');
-$conn = new mysqli('localhost', 'shapnach_ahad', 'xD9Er_S4)kIl', 'shapnach_moderator09');
+$conn = new mysqli('localhost', 'shapnach_wp2026', 'shapnach_wp2026', 'shapnach_moderator09');
 
 if ($conn->connect_error) {
     echo json_encode(['error' => 'Database connection failed']);

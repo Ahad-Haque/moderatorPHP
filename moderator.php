@@ -7,7 +7,7 @@ session_start();
 require_once('wp-load.php');
 
 // Database connection
-$conn = new mysqli('localhost', 'shapnach_ahad', 'xD9Er_S4)kIl', 'shapnach_moderator09');
+$conn = new mysqli('localhost', 'shapnach_wp2026', 'shapnach_wp2026', 'shapnach_moderator09');
 
 // Check connection
 if ($conn->connect_error) {
