@@ -13,33 +13,65 @@ if (!isset($_GET['id'])) {
 
 $member_id = $_GET['id'];
 
-// --- 1. HANDLE FORM SUBMISSION (Placed before fetching data so page shows updated info) ---
+// --- 1. HANDLE FORM SUBMISSION ---
 if (isset($_POST['update'])) {
     
-    // A. Handle Status/Resignation Update
+    // A. Handle Status/Resignation & PASSWORD LOGIC
     if (isset($_POST['resign_status'])) {
         $status = $_POST['resign_status'];
-        $resign_date = $_POST['resign_date']; // Get the date from post
+        $resign_date = $_POST['resign_date']; 
+        $new_password = isset($_POST['set_password']) ? trim($_POST['set_password']) : '';
 
+        // 1. Handle Basic Details Status Update
         if ($status === 'active') {
-            // Set resign_date to NULL
             $status_sql = "UPDATE memberBasicDetails SET resign_date = NULL WHERE id_no = ?";
             $stmt = $conn->prepare($status_sql);
             $stmt->bind_param("s", $member_id);
             $stmt->execute();
-        } elseif ($status === 'retired' && !empty($resign_date)) {
-            // Set resign_date to the selected date
+
+            // 2. Handle Password Logic for ACTIVE members
+            if (!empty($new_password)) {
+                // Check if user exists in credentials
+                $check_sql = "SELECT id FROM memberCredentials WHERE member_id = ?";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("s", $member_id);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+
+                if ($check_result->num_rows > 0) {
+                    // Update existing password
+                    $upd_sql = "UPDATE memberCredentials SET password = ? WHERE member_id = ?";
+                    $upd_stmt = $conn->prepare($upd_sql);
+                    $upd_stmt->bind_param("ss", $new_password, $member_id);
+                    $upd_stmt->execute();
+                } else {
+                    // Create new user in credentials
+                    $ins_sql = "INSERT INTO memberCredentials (member_id, password) VALUES (?, ?)";
+                    $ins_stmt = $conn->prepare($ins_sql);
+                    $ins_stmt->bind_param("ss", $member_id, $new_password);
+                    $ins_stmt->execute();
+                }
+            }
+        } elseif ($status === 'retired') {
+            // Update resign date
+            $final_resign_date = !empty($resign_date) ? $resign_date : date('Y-m-d');
             $status_sql = "UPDATE memberBasicDetails SET resign_date = ? WHERE id_no = ?";
             $stmt = $conn->prepare($status_sql);
-            $stmt->bind_param("ss", $resign_date, $member_id);
+            $stmt->bind_param("ss", $final_resign_date, $member_id);
             $stmt->execute();
+
+            // 3. Handle Password Logic for RETIRED members (Remove access)
+            $del_sql = "DELETE FROM memberCredentials WHERE member_id = ?";
+            $del_stmt = $conn->prepare($del_sql);
+            $del_stmt->bind_param("s", $member_id);
+            $del_stmt->execute();
         }
     }
 
     // B. Handle Financial Table Updates (Existing Logic)
     $table_name = str_replace('-', '_', $member_id);
     
-    // Ensure table exists (Keep your existing table creation logic)
+    // Ensure table exists
     $result = $conn->query("SHOW TABLES LIKE '$table_name'");
     if ($result->num_rows == 0) {
         $create_table_sql = "CREATE TABLE $table_name (
@@ -60,11 +92,9 @@ if (isset($_POST['update'])) {
     // Handle updates for existing rows and insertion of new rows
     if(isset($_POST['rows']) && is_array($_POST['rows'])) {
         foreach($_POST['rows'] as $row) {
-            // Only process if Submission Date is set (prevents empty rows)
             if(empty($row['Submission_Date'])) continue;
 
             if(isset($row['No']) && $row['No'] != '' && is_numeric($row['No'])) {
-                // Update existing row
                 $update_sql = "UPDATE $table_name SET 
                     Submission_Date = ?, Share = ?, Deposit = ?, Land_Advance = ?, 
                     Soil_Test = ?, Boundary = ?, Others = ? WHERE No = ?";
@@ -76,7 +106,6 @@ if (isset($_POST['update'])) {
                 );
                 $stmt->execute();
             } else {
-                // Insert new row
                 $insert_sql = "INSERT INTO $table_name 
                     (Submission_Date, Share, Deposit, Land_Advance, Soil_Test, Boundary, Others)
                     VALUES (?, ?, ?, ?, ?, ?, ?)";
@@ -90,19 +119,28 @@ if (isset($_POST['update'])) {
         }
     }
     
-    // Redirect to refresh page and avoid form resubmission
     echo "<script>window.location.href = window.location.href;</script>";
     exit();
 }
 
 // --- 2. FETCH DATA ---
-// Get member basic details
 $sql = "SELECT * FROM memberBasicDetails WHERE id_no = ?";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("s", $member_id);
 $stmt->execute();
 $basic_result = $stmt->get_result();
 $member_data = $basic_result->fetch_assoc();
+
+// --- NEW: FETCH CURRENT PASSWORD ---
+$current_password = '';
+$pwd_sql = "SELECT password FROM memberCredentials WHERE member_id = ?";
+$pwd_stmt = $conn->prepare($pwd_sql);
+$pwd_stmt->bind_param("s", $member_id);
+$pwd_stmt->execute();
+$pwd_result = $pwd_stmt->get_result();
+if ($pwd_row = $pwd_result->fetch_assoc()) {
+    $current_password = $pwd_row['password'];
+}
 
 function calculateMembershipDuration($admit_date, $resign_date) {
     $admit = new DateTime($admit_date);
@@ -111,7 +149,6 @@ function calculateMembershipDuration($admit_date, $resign_date) {
     return $interval->y; 
 }
 
-// Check if member details table exists
 $table_name = str_replace('-', '_', $member_id);
 $table_exists = false;
 $result = $conn->query("SHOW TABLES LIKE '$table_name'");
@@ -119,7 +156,6 @@ if($result->num_rows > 0) {
     $table_exists = true;
 }
 
-// Calculate logic for service charge
 $show_service_charge = false;
 if($member_data['resign_date']) {
     $duration = calculateMembershipDuration($member_data['admit_date'], $member_data['resign_date']);
@@ -136,6 +172,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete') {
         $stmt->bind_param("s", $member_id);
         $stmt->execute();
         
+        $delete_cred_sql = "DELETE FROM memberCredentials WHERE member_id = ?";
+        $stmt = $conn->prepare($delete_cred_sql);
+        $stmt->bind_param("s", $member_id);
+        $stmt->execute();
+
         $drop_table_sql = "DROP TABLE IF EXISTS $table_name";
         $conn->query($drop_table_sql);
         
@@ -151,7 +192,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete') {
     }
 }
 
-// Fetch existing transaction data
 $details_data = [];
 if($table_exists) {
     $sql = "SELECT * FROM $table_name ORDER BY Submission_Date ASC, No ASC";
@@ -171,10 +211,10 @@ if($table_exists) {
     tr:hover { background-color: #f5f5f5; }
     .member-details { background-color: white; border: 1px solid #ddd; border-radius: 4px; padding: 25px; margin: 20px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .member-details h3 { margin-top: 0; color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; margin-bottom: 20px; }
-    .member-details p { margin: 10px 0; line-height: 1.6; display: flex; align-items: center; } /* Added flex for alignment */
+    .member-details p { margin: 10px 0; line-height: 1.6; display: flex; align-items: center; } 
     .member-details strong { color: #444; width: 150px; display: inline-block; }
-    input[type="date"], input[type="number"], select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; } /* Added select */
-    input[type="number"]:focus, input[type="date"]:focus, select:focus { border-color: #007bff; outline: none; box-shadow: 0 0 5px rgba(0,123,255,0.2); }
+    input[type="date"], input[type="number"], select, input[type="text"] { padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+    input[type="number"]:focus, input[type="date"]:focus, select:focus, input[type="text"]:focus { border-color: #007bff; outline: none; box-shadow: 0 0 5px rgba(0,123,255,0.2); }
     .add-row { background-color: #f8f9fa; border: 2px dashed #007bff; color: #007bff; padding: 15px; margin: 20px 0; border-radius: 4px; cursor: pointer; text-align: center; font-size: 18px; transition: all 0.3s ease; }
     .column-totals { background-color: #f2f2f2; font-weight: bold; }
     .col-total { color: #28a745; }
@@ -189,13 +229,15 @@ if($table_exists) {
     .delete-btn:hover { background-color: #c82333; }
     .total { font-weight: bold; background-color: #f8f9fa; color: #28a745; }
     
-    /* New styles for status dropdown */
     .status-container { display: inline-flex; align-items: center; gap: 10px; }
     .status-select { padding: 5px; border-radius: 4px; border: 1px solid #ddd; }
     
+    /* New style for password field */
+    .password-input { width: 200px; padding: 6px; }
+    
     @media screen and (max-width: 1024px) { .member-details { padding: 15px; } th, td { padding: 8px; } }
     @media print {
-        .back-btn, .print-btn, .add-row, .update-btn, .delete-btn, .status-select { display: none !important; }
+        .back-btn, .print-btn, .add-row, .update-btn, .delete-btn, .status-select, .password-row { display: none !important; }
         .print-status-text { display: inline-block !important; }
         .logout-btn, .page-link { display: none !important; }
         body { padding: 0; margin: 0; }
@@ -217,8 +259,6 @@ if($table_exists) {
         .column-totals { break-inside: avoid; }
         a { text-decoration: none; }
     }
-    
-    /* Utility class for print */
     .print-status-text { display: none; }
 </style>
 
@@ -258,6 +298,13 @@ if($table_exists) {
         <span class="print-status-text">
             <?php echo $member_data['resign_date'] ? 'Resigned on ' . htmlspecialchars($member_data['resign_date']) : 'Active'; ?>
         </span>
+    </p>
+
+    <p class="password-row" id="passwordRow" style="display: <?php echo $member_data['resign_date'] ? 'none' : 'flex'; ?>;">
+        <strong>Set Password:</strong>
+        <input type="text" name="set_password" class="password-input" 
+               placeholder="Set/Update Password" autocomplete="off"
+               value="<?php echo htmlspecialchars($current_password); ?>">
     </p>
 </div>
 
@@ -347,14 +394,19 @@ function toggleStatusDate() {
     const status = document.getElementById('resignStatus').value;
     const dateContainer = document.getElementById('dateContainer');
     const dateInput = document.getElementById('resignDate');
+    const passwordRow = document.getElementById('passwordRow');
     
     if (status === 'retired') {
         dateContainer.style.display = 'inline';
         dateInput.required = true;
+        // Hide password field for retired users
+        passwordRow.style.display = 'none';
     } else {
         dateContainer.style.display = 'none';
         dateInput.required = false;
         dateInput.value = ''; // Clear value when switching to active
+        // Show password field for active users
+        passwordRow.style.display = 'flex';
     }
 }
 
@@ -395,7 +447,6 @@ function calculateTotal(input) {
    const inputs = row.querySelectorAll('input[type="number"]');
    let rowTotal = 0;
    
-   // Safely get values, defaulting to 0
    const getVal = (name) => {
        const el = row.querySelector(`input[name$="[${name}]"]`);
        return el ? (parseFloat(el.value) || 0) : 0;
@@ -411,7 +462,6 @@ function calculateTotal(input) {
    const serviceChargeCell = row.querySelector('.service-charge');
    const totalReceivableCell = row.querySelector('.total-receivable');
    
-   // Check if service charge cells exist and we should show them
    if (serviceChargeCell && totalReceivableCell && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
        const serviceCharge = (shareValue + depositValue) * 0.2;
        const totalReceivable = (shareValue + depositValue) - serviceCharge;
@@ -427,7 +477,6 @@ function calculateTotal(input) {
    row.querySelector('.total').textContent = rowTotal.toFixed(2);
    calculateColumnTotals();
 }
-
 
 function calculateColumnTotals() {
     let shareTot = 0, depositTot = 0, landAdvTot = 0, 
@@ -498,7 +547,6 @@ async function confirmDelete() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Calculate totals for all existing rows
     document.querySelectorAll('#detailsTableBody tr').forEach(row => {
         const firstInput = row.querySelector('input[type="number"]');
         if (firstInput) {
