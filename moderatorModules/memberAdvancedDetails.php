@@ -1,6 +1,5 @@
 <?php
-// moderatorModules\memberAdvancedDetails.php
-// Check if user is logged in
+// moderatorModules/memberAdvancedDetails.php
 if (!isset($_SESSION['loggedin'])) {
     header("Location: ../moderator.php");
     exit();
@@ -13,25 +12,37 @@ if (!isset($_GET['id'])) {
 
 $member_id = $_GET['id'];
 
-// --- 1. HANDLE FORM SUBMISSION ---
 if (isset($_POST['update'])) {
     
-    // A. Handle Status/Resignation & PASSWORD LOGIC
+    if (isset($_POST['update_basic_info']) && $_POST['update_basic_info'] === '1') {
+        $update_basic_sql = "UPDATE memberBasicDetails SET 
+            name = ?, designation = ?, fathers_name = ?, address = ?, mobile_no = ?, admit_date = ?
+            WHERE id_no = ?";
+        $stmt = $conn->prepare($update_basic_sql);
+        $stmt->bind_param("sssssss", 
+            $_POST['edit_name'],
+            $_POST['edit_designation'],
+            $_POST['edit_fathers_name'],
+            $_POST['edit_address'],
+            $_POST['edit_mobile_no'],
+            $_POST['edit_admit_date'],
+            $member_id
+        );
+        $stmt->execute();
+    }
+
     if (isset($_POST['resign_status'])) {
         $status = $_POST['resign_status'];
         $resign_date = $_POST['resign_date']; 
         $new_password = isset($_POST['set_password']) ? trim($_POST['set_password']) : '';
 
-        // 1. Handle Basic Details Status Update
         if ($status === 'active') {
             $status_sql = "UPDATE memberBasicDetails SET resign_date = NULL WHERE id_no = ?";
             $stmt = $conn->prepare($status_sql);
             $stmt->bind_param("s", $member_id);
             $stmt->execute();
 
-            // 2. Handle Password Logic for ACTIVE members
             if (!empty($new_password)) {
-                // Check if user exists in credentials
                 $check_sql = "SELECT id FROM memberCredentials WHERE member_id = ?";
                 $check_stmt = $conn->prepare($check_sql);
                 $check_stmt->bind_param("s", $member_id);
@@ -39,13 +50,11 @@ if (isset($_POST['update'])) {
                 $check_result = $check_stmt->get_result();
 
                 if ($check_result->num_rows > 0) {
-                    // Update existing password
                     $upd_sql = "UPDATE memberCredentials SET password = ? WHERE member_id = ?";
                     $upd_stmt = $conn->prepare($upd_sql);
                     $upd_stmt->bind_param("ss", $new_password, $member_id);
                     $upd_stmt->execute();
                 } else {
-                    // Create new user in credentials
                     $ins_sql = "INSERT INTO memberCredentials (member_id, password) VALUES (?, ?)";
                     $ins_stmt = $conn->prepare($ins_sql);
                     $ins_stmt->bind_param("ss", $member_id, $new_password);
@@ -53,14 +62,12 @@ if (isset($_POST['update'])) {
                 }
             }
         } elseif ($status === 'retired') {
-            // Update resign date
             $final_resign_date = !empty($resign_date) ? $resign_date : date('Y-m-d');
             $status_sql = "UPDATE memberBasicDetails SET resign_date = ? WHERE id_no = ?";
             $stmt = $conn->prepare($status_sql);
             $stmt->bind_param("ss", $final_resign_date, $member_id);
             $stmt->execute();
 
-            // 3. Handle Password Logic for RETIRED members (Remove access)
             $del_sql = "DELETE FROM memberCredentials WHERE member_id = ?";
             $del_stmt = $conn->prepare($del_sql);
             $del_stmt->bind_param("s", $member_id);
@@ -68,10 +75,8 @@ if (isset($_POST['update'])) {
         }
     }
 
-    // B. Handle Financial Table Updates (Existing Logic)
     $table_name = str_replace('-', '_', $member_id);
     
-    // Ensure table exists
     $result = $conn->query("SHOW TABLES LIKE '$table_name'");
     if ($result->num_rows == 0) {
         $create_table_sql = "CREATE TABLE $table_name (
@@ -89,7 +94,6 @@ if (isset($_POST['update'])) {
         $conn->query($create_table_sql);
     }
 
-    // Handle updates for existing rows and insertion of new rows
     if(isset($_POST['rows']) && is_array($_POST['rows'])) {
         foreach($_POST['rows'] as $row) {
             if(empty($row['Submission_Date'])) continue;
@@ -123,7 +127,6 @@ if (isset($_POST['update'])) {
     exit();
 }
 
-// --- 2. FETCH DATA ---
 $sql = "SELECT * FROM memberBasicDetails WHERE id_no = ?";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("s", $member_id);
@@ -131,7 +134,6 @@ $stmt->execute();
 $basic_result = $stmt->get_result();
 $member_data = $basic_result->fetch_assoc();
 
-// --- NEW: FETCH CURRENT PASSWORD ---
 $current_password = '';
 $pwd_sql = "SELECT password FROM memberCredentials WHERE member_id = ?";
 $pwd_stmt = $conn->prepare($pwd_sql);
@@ -162,7 +164,6 @@ if($member_data['resign_date']) {
     $show_service_charge = ($duration < 5);
 }
 
-// Handle Delete Action
 if (isset($_GET['action']) && $_GET['action'] === 'delete') {
     ob_clean();
     $conn->begin_transaction();
@@ -203,7 +204,6 @@ if($table_exists) {
 ?>
 
 <style>
-    /* Kept your existing styles */
     table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
     th { background-color: #f2f2f2; font-weight: bold; color: #333; }
@@ -219,8 +219,13 @@ if($table_exists) {
     .column-totals { background-color: #f2f2f2; font-weight: bold; }
     .col-total { color: #28a745; }
     .add-row:hover { background-color: #e9ecef; transform: translateY(-1px); }
-    .print-btn { float: right; background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
+    .print-btn, .edit-btn { float: right; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; margin-left: 10px; }
+    .print-btn { background-color: #28a745; color: white; }
     .print-btn:hover { background-color: #218838; }
+    .edit-btn { background-color: #ffc107; color: #212529; }
+    .edit-btn:hover { background-color: #e0a800; }
+    .edit-btn.cancel { background-color: #6c757d; color: white; }
+    .edit-btn.cancel:hover { background-color: #5a6268; }
     .update-btn { background-color: #28a745; color: white; padding: 12px 25px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 20px; transition: background-color 0.3s ease; }
     .update-btn:hover { background-color: #218838; }
     .back-btn { background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-bottom: 20px; transition: background-color 0.3s ease; }
@@ -228,16 +233,24 @@ if($table_exists) {
     .delete-btn { background-color: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; float: right; font-size: 16px; transition: background-color 0.3s ease; }
     .delete-btn:hover { background-color: #c82333; }
     .total { font-weight: bold; background-color: #f8f9fa; color: #28a745; }
-    
     .status-container { display: inline-flex; align-items: center; gap: 10px; }
     .status-select { padding: 5px; border-radius: 4px; border: 1px solid #ddd; }
-    
-    /* New style for password field */
     .password-input { width: 200px; padding: 6px; }
-    
+    .editable-field { display: none; width: 250px; }
+    .editable-field.active { display: inline-block; }
+    .field-text.hidden { display: none; }
+    .btn-group { float: right; }
+    @media screen and (max-width: 768px) {
+        .member-details p { flex-direction: column; align-items: flex-start; }
+        .member-details strong { width: 100%; margin-bottom: 5px; }
+        .editable-field { width: 100%; }
+        .btn-group { float: none; display: flex; gap: 10px; margin-bottom: 15px; }
+        .print-btn, .edit-btn { float: none; margin: 0; }
+    }
     @media screen and (max-width: 1024px) { .member-details { padding: 15px; } th, td { padding: 8px; } }
     @media print {
-        .back-btn, .print-btn, .add-row, .update-btn, .delete-btn, .status-select, .password-row { display: none !important; }
+        .back-btn, .print-btn, .edit-btn, .add-row, .update-btn, .delete-btn, .status-select, .password-row, .editable-field, .btn-group { display: none !important; }
+        .field-text { display: inline !important; }
         .print-status-text { display: inline-block !important; }
         .logout-btn, .page-link { display: none !important; }
         body { padding: 0; margin: 0; }
@@ -263,38 +276,68 @@ if($table_exists) {
 </style>
 
 <a href="moderator.php?module=userDetails" class="back-btn">← Back</a>
-
 <button class="delete-btn" onclick="confirmDelete()">Delete Member</button>
 
 <form id="detailsForm" method="POST">
+<input type="hidden" name="update_basic_info" id="updateBasicInfo" value="0">
 
 <div class="member-details">
     <h3>Member Basic Information</h3>
-    <button type="button" onclick="window.print()" class="print-btn">Print</button>
-    <p><strong>ID:</strong> <?php echo htmlspecialchars($member_data['id_no']); ?></p>
-    <p><strong>Name:</strong> <?php echo htmlspecialchars($member_data['name']); ?></p>
-    <p><strong>Designation:</strong> <?php echo htmlspecialchars($member_data['designation']); ?></p>
-    <p><strong>Father's Name:</strong> <?php echo htmlspecialchars($member_data['fathers_name']); ?></p>
-    <p><strong>Address:</strong> <?php echo htmlspecialchars($member_data['address']); ?></p>
-    <p><strong>Mobile No:</strong> <?php echo htmlspecialchars($member_data['mobile_no']); ?></p>
-    <p><strong>Admit Date:</strong> <?php echo htmlspecialchars($member_data['admit_date']); ?></p>
+    <div class="btn-group">
+        <button type="button" onclick="window.print()" class="print-btn">Print</button>
+        <button type="button" onclick="toggleEditMode()" class="edit-btn" id="editBtn">Edit</button>
+    </div>
+    
+    <p><strong>ID:</strong> <span><?php echo htmlspecialchars($member_data['id_no']); ?></span></p>
+    
+    <p>
+        <strong>Name:</strong> 
+        <span class="field-text" data-field="name"><?php echo htmlspecialchars($member_data['name']); ?></span>
+        <input type="text" name="edit_name" class="editable-field" data-field="name" value="<?php echo htmlspecialchars($member_data['name']); ?>">
+    </p>
+    
+    <p>
+        <strong>Designation:</strong> 
+        <span class="field-text" data-field="designation"><?php echo htmlspecialchars($member_data['designation']); ?></span>
+        <input type="text" name="edit_designation" class="editable-field" data-field="designation" value="<?php echo htmlspecialchars($member_data['designation']); ?>">
+    </p>
+    
+    <p>
+        <strong>Father's Name:</strong> 
+        <span class="field-text" data-field="fathers_name"><?php echo htmlspecialchars($member_data['fathers_name']); ?></span>
+        <input type="text" name="edit_fathers_name" class="editable-field" data-field="fathers_name" value="<?php echo htmlspecialchars($member_data['fathers_name']); ?>">
+    </p>
+    
+    <p>
+        <strong>Address:</strong> 
+        <span class="field-text" data-field="address"><?php echo htmlspecialchars($member_data['address']); ?></span>
+        <input type="text" name="edit_address" class="editable-field" data-field="address" value="<?php echo htmlspecialchars($member_data['address']); ?>">
+    </p>
+    
+    <p>
+        <strong>Mobile No:</strong> 
+        <span class="field-text" data-field="mobile_no"><?php echo htmlspecialchars($member_data['mobile_no']); ?></span>
+        <input type="text" name="edit_mobile_no" class="editable-field" data-field="mobile_no" value="<?php echo htmlspecialchars($member_data['mobile_no']); ?>">
+    </p>
+    
+    <p>
+        <strong>Admit Date:</strong> 
+        <span class="field-text" data-field="admit_date"><?php echo htmlspecialchars($member_data['admit_date']); ?></span>
+        <input type="date" name="edit_admit_date" class="editable-field" data-field="admit_date" value="<?php echo htmlspecialchars($member_data['admit_date']); ?>">
+    </p>
     
     <p>
         <strong>Status:</strong> 
-        
         <span class="status-container">
             <select name="resign_status" id="resignStatus" class="status-select" onchange="toggleStatusDate()">
                 <option value="active" <?php echo $member_data['resign_date'] ? '' : 'selected'; ?>>Active</option>
                 <option value="retired" <?php echo $member_data['resign_date'] ? 'selected' : ''; ?>>Retired</option>
             </select>
-            
             <span id="dateContainer" style="display: <?php echo $member_data['resign_date'] ? 'inline' : 'none'; ?>;">
                 on 
-                <input type="date" name="resign_date" id="resignDate" 
-                       value="<?php echo $member_data['resign_date'] ? $member_data['resign_date'] : ''; ?>">
+                <input type="date" name="resign_date" id="resignDate" value="<?php echo $member_data['resign_date'] ? $member_data['resign_date'] : ''; ?>">
             </span>
         </span>
-
         <span class="print-status-text">
             <?php echo $member_data['resign_date'] ? 'Resigned on ' . htmlspecialchars($member_data['resign_date']) : 'Active'; ?>
         </span>
@@ -302,9 +345,7 @@ if($table_exists) {
 
     <p class="password-row" id="passwordRow" style="display: <?php echo $member_data['resign_date'] ? 'none' : 'flex'; ?>;">
         <strong>Set Password:</strong>
-        <input type="text" name="set_password" class="password-input" 
-               placeholder="Set/Update Password" autocomplete="off"
-               value="<?php echo htmlspecialchars($current_password); ?>">
+        <input type="text" name="set_password" class="password-input" placeholder="Set/Update Password" autocomplete="off" value="<?php echo htmlspecialchars($current_password); ?>">
     </p>
 </div>
 
@@ -389,7 +430,60 @@ if($table_exists) {
 </form>
 
 <script>
-// --- Status/Date Toggle Script ---
+let isEditMode = false;
+let originalValues = {};
+
+function toggleEditMode() {
+    const editBtn = document.getElementById('editBtn');
+    const fields = document.querySelectorAll('.editable-field');
+    const texts = document.querySelectorAll('.field-text');
+    
+    isEditMode = !isEditMode;
+    
+    if (isEditMode) {
+        fields.forEach(field => {
+            const fieldName = field.getAttribute('data-field');
+            originalValues[fieldName] = field.value;
+            field.classList.add('active');
+        });
+        texts.forEach(text => text.classList.add('hidden'));
+        editBtn.textContent = 'Cancel Edit';
+        editBtn.classList.add('cancel');
+    } else {
+        fields.forEach(field => {
+            const fieldName = field.getAttribute('data-field');
+            field.value = originalValues[fieldName] || field.value;
+            field.classList.remove('active');
+        });
+        texts.forEach(text => text.classList.remove('hidden'));
+        editBtn.textContent = 'Edit';
+        editBtn.classList.remove('cancel');
+        document.getElementById('updateBasicInfo').value = '0';
+    }
+}
+
+function checkBasicInfoChanges() {
+    if (!isEditMode) return false;
+    
+    const fields = document.querySelectorAll('.editable-field');
+    let hasChanges = false;
+    
+    fields.forEach(field => {
+        const fieldName = field.getAttribute('data-field');
+        if (field.value !== originalValues[fieldName]) {
+            hasChanges = true;
+        }
+    });
+    
+    return hasChanges;
+}
+
+document.getElementById('detailsForm').addEventListener('submit', function(e) {
+    if (isEditMode && checkBasicInfoChanges()) {
+        document.getElementById('updateBasicInfo').value = '1';
+    }
+});
+
 function toggleStatusDate() {
     const status = document.getElementById('resignStatus').value;
     const dateContainer = document.getElementById('dateContainer');
@@ -399,13 +493,11 @@ function toggleStatusDate() {
     if (status === 'retired') {
         dateContainer.style.display = 'inline';
         dateInput.required = true;
-        // Hide password field for retired users
         passwordRow.style.display = 'none';
     } else {
         dateContainer.style.display = 'none';
         dateInput.required = false;
-        dateInput.value = ''; // Clear value when switching to active
-        // Show password field for active users
+        dateInput.value = '';
         passwordRow.style.display = 'flex';
     }
 }
@@ -417,18 +509,14 @@ function addNewRow() {
     const isResigned = document.querySelector('.service-charge') !== null;
     
     let rowHTML = `
-        <td>New
-            <input type="hidden" name="rows[${rowIndex}][No]" value="">
-        </td>
+        <td>New<input type="hidden" name="rows[${rowIndex}][No]" value=""></td>
         <td><input type="date" name="rows[${rowIndex}][Submission_Date]" required></td>
         <td><input type="number" step="0.01" name="rows[${rowIndex}][Share]" value="0.00" oninput="calculateTotal(this)"></td>
         <td><input type="number" step="0.01" name="rows[${rowIndex}][Deposit]" value="0.00" oninput="calculateTotal(this)"></td>`;
         
-        if (isResigned && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
-            rowHTML += `
-                <td class="service-charge">0.00</td>
-                <td class="total-receivable">0.00</td>`;
-        }
+    if (isResigned && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
+        rowHTML += `<td class="service-charge">0.00</td><td class="total-receivable">0.00</td>`;
+    }
     
     rowHTML += `
         <td><input type="number" step="0.01" name="rows[${rowIndex}][Land_Advance]" value="0.00" oninput="calculateTotal(this)"></td>
@@ -443,45 +531,39 @@ function addNewRow() {
 }
 
 function calculateTotal(input) {
-   const row = input.closest('tr');
-   const inputs = row.querySelectorAll('input[type="number"]');
-   let rowTotal = 0;
-   
-   const getVal = (name) => {
-       const el = row.querySelector(`input[name$="[${name}]"]`);
-       return el ? (parseFloat(el.value) || 0) : 0;
-   };
+    const row = input.closest('tr');
+    const getVal = (name) => {
+        const el = row.querySelector(`input[name$="[${name}]"]`);
+        return el ? (parseFloat(el.value) || 0) : 0;
+    };
 
-   const shareValue = getVal('Share');
-   const depositValue = getVal('Deposit');
-   const landAdvValue = getVal('Land_Advance');
-   const soilTestValue = getVal('Soil_Test');
-   const boundaryValue = getVal('Boundary');
-   const othersValue = getVal('Others');
-   
-   const serviceChargeCell = row.querySelector('.service-charge');
-   const totalReceivableCell = row.querySelector('.total-receivable');
-   
-   if (serviceChargeCell && totalReceivableCell && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
-       const serviceCharge = (shareValue + depositValue) * 0.2;
-       const totalReceivable = (shareValue + depositValue) - serviceCharge;
-       
-       serviceChargeCell.textContent = serviceCharge.toFixed(2);
-       totalReceivableCell.textContent = totalReceivable.toFixed(2);
-       
-       rowTotal = totalReceivable + landAdvValue + soilTestValue + boundaryValue + othersValue;
-   } else {
-       rowTotal = shareValue + depositValue + landAdvValue + soilTestValue + boundaryValue + othersValue;
-   }
-   
-   row.querySelector('.total').textContent = rowTotal.toFixed(2);
-   calculateColumnTotals();
+    const shareValue = getVal('Share');
+    const depositValue = getVal('Deposit');
+    const landAdvValue = getVal('Land_Advance');
+    const soilTestValue = getVal('Soil_Test');
+    const boundaryValue = getVal('Boundary');
+    const othersValue = getVal('Others');
+    
+    const serviceChargeCell = row.querySelector('.service-charge');
+    const totalReceivableCell = row.querySelector('.total-receivable');
+    let rowTotal = 0;
+    
+    if (serviceChargeCell && totalReceivableCell && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
+        const serviceCharge = (shareValue + depositValue) * 0.2;
+        const totalReceivable = (shareValue + depositValue) - serviceCharge;
+        serviceChargeCell.textContent = serviceCharge.toFixed(2);
+        totalReceivableCell.textContent = totalReceivable.toFixed(2);
+        rowTotal = totalReceivable + landAdvValue + soilTestValue + boundaryValue + othersValue;
+    } else {
+        rowTotal = shareValue + depositValue + landAdvValue + soilTestValue + boundaryValue + othersValue;
+    }
+    
+    row.querySelector('.total').textContent = rowTotal.toFixed(2);
+    calculateColumnTotals();
 }
 
 function calculateColumnTotals() {
-    let shareTot = 0, depositTot = 0, landAdvTot = 0, 
-        soilTestTot = 0, boundaryTot = 0, othersTot = 0, grandTot = 0,
-        serviceChargeTot = 0, totalReceivableTot = 0;
+    let shareTot = 0, depositTot = 0, landAdvTot = 0, soilTestTot = 0, boundaryTot = 0, othersTot = 0, grandTot = 0, serviceChargeTot = 0, totalReceivableTot = 0;
 
     const rows = document.querySelectorAll('#detailsTableBody tr');
     
@@ -549,9 +631,7 @@ async function confirmDelete() {
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('#detailsTableBody tr').forEach(row => {
         const firstInput = row.querySelector('input[type="number"]');
-        if (firstInput) {
-            calculateTotal(firstInput);
-        }
+        if (firstInput) calculateTotal(firstInput);
     });
     calculateColumnTotals();
 });
