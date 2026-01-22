@@ -1,24 +1,18 @@
 <?php
-/**
- * Member Portal - View Only + Change Password
- * Path: public_html/members/index.php
- */
+// members/index.php
 session_start();
 
-// 1. Database Connection
 $conn = new mysqli('localhost', 'shapnach_wp2026', 'shapnach_wp2026', 'shapnach_moderator09');
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// 2. Handle Logout
 if (isset($_GET['logout'])) {
     session_destroy();
     header("Location: index.php");
     exit();
 }
 
-// 3. Handle Login Logic
 $error_message = '';
 $success_message = '';
 
@@ -26,7 +20,6 @@ if (isset($_POST['login'])) {
     $memberID = $_POST['memberID'];
     $password = $_POST['password'];
 
-    // Check credentials against the DB
     $stmt = $conn->prepare("SELECT * FROM memberCredentials WHERE member_id = ? AND password = ?");
     $stmt->bind_param("ss", $memberID, $password);
     $stmt->execute();
@@ -42,20 +35,17 @@ if (isset($_POST['login'])) {
     }
 }
 
-// 4. Handle Password Change Logic
 if (isset($_POST['change_password']) && isset($_SESSION['member_loggedin'])) {
     $memberID = $_SESSION['member_id'];
     $oldPass = $_POST['old_password'];
     $newPass = $_POST['new_password'];
 
-    // Verify old password first
     $stmt = $conn->prepare("SELECT * FROM memberCredentials WHERE member_id = ? AND password = ?");
     $stmt->bind_param("ss", $memberID, $oldPass);
     $stmt->execute();
     $result = $stmt->get_result();
 
     if ($result->num_rows > 0) {
-        // Update to new password
         $upd = $conn->prepare("UPDATE memberCredentials SET password = ? WHERE member_id = ?");
         $upd->bind_param("ss", $newPass, $memberID);
         if ($upd->execute()) {
@@ -68,7 +58,6 @@ if (isset($_POST['change_password']) && isset($_SESSION['member_loggedin'])) {
     }
 }
 
-// 5. Fetch Data (Only if logged in)
 $member_data = null;
 $details_data = [];
 $totals = [
@@ -79,23 +68,19 @@ $totals = [
 if (isset($_SESSION['member_loggedin'])) {
     $member_id = $_SESSION['member_id'];
 
-    // A. Fetch Basic Details
     $stmt = $conn->prepare("SELECT * FROM memberBasicDetails WHERE id_no = ?");
     $stmt->bind_param("s", $member_id);
     $stmt->execute();
     $basic_result = $stmt->get_result();
     $member_data = $basic_result->fetch_assoc();
 
-    // B. Fetch Transaction Details
     if ($member_data) {
-        $table_name = str_replace('-', '_', $member_id);
-        
-        $check_table = $conn->query("SHOW TABLES LIKE '$table_name'");
-        
-        if ($check_table && $check_table->num_rows > 0) {
-            $sql = "SELECT * FROM $table_name ORDER BY Submission_Date ASC, No ASC";
-            $result = $conn->query($sql);
-            
+        $table_name = strtoupper(str_replace('-', '_', $member_id));
+
+        $sql = "SELECT * FROM `$table_name` ORDER BY Submission_Date ASC, No ASC";
+        $result = $conn->query($sql);
+
+        if ($result && $result->num_rows > 0) {
             while($row = $result->fetch_assoc()) {
                 $details_data[] = $row;
                 $totals['Share'] += $row['Share'];
@@ -112,6 +97,8 @@ if (isset($_SESSION['member_loggedin'])) {
         }
     }
 }
+
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -122,8 +109,6 @@ if (isset($_SESSION['member_loggedin'])) {
     <title>Member Portal | Shapnachura</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
-        
-        /* Login Styles */
         .login-container {
             max-width: 400px; margin: 80px auto; padding: 30px;
             background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
@@ -146,42 +131,41 @@ if (isset($_SESSION['member_loggedin'])) {
         }
         .error { color: #dc3545; text-align: center; margin-bottom: 15px; padding: 10px; background: #f8d7da; border-radius: 4px; }
         .success { color: #28a745; text-align: center; margin-bottom: 15px; padding: 10px; background: #d4edda; border-radius: 4px; }
-
-        /* Dashboard Styles */
         .dashboard-container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .header-section { border-bottom: 2px solid #007bff; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-start; }
-        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .header-section { border-bottom: 2px solid #007bff; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
         .info-item { margin-bottom: 10px; }
         .info-label { font-weight: bold; color: #555; width: 120px; display: inline-block; }
-        
-        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         .logout-btn {
             background-color: #dc3545; color: white; padding: 8px 20px;
             text-decoration: none; border-radius: 4px; font-size: 14px;
         }
-
-        /* Modal for Password Change */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
-        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 300px; border-radius: 8px; }
+        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 300px; border-radius: 8px; }
         .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
         .close:hover { color: black; }
-        
-        /* Table Styles */
         .table-responsive { overflow-x: auto; }
         table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 20px; border: 1px solid #dee2e6; border-radius: 4px; }
-        th { background-color: #f8f9fa; color: #495057; font-weight: 600; padding: 15px; text-align: left; border-bottom: 2px solid #dee2e6; }
+        th { background-color: #f8f9fa; color: #495057; font-weight: 600; padding: 15px; text-align: left; border-bottom: 2px solid #dee2e6; white-space: nowrap; }
         td { padding: 12px 15px; border-bottom: 1px solid #dee2e6; color: #444; }
         tr:last-child td { border-bottom: none; }
-        
         .readonly-field {
             background-color: #fff; border: 1px solid #e2e5e9; padding: 8px 12px;
             border-radius: 4px; color: #495057; display: block; width: 100%;
             box-sizing: border-box; font-size: 14px;
         }
-        
         .totals-row td { background-color: #f1f3f5; font-weight: bold; color: #28a745; border-top: 2px solid #dee2e6; }
         .status-active { color: #28a745; font-weight: bold; }
         .status-retired { color: #dc3545; font-weight: bold; }
+        @media screen and (max-width: 768px) {
+            body { padding: 10px; }
+            .dashboard-container { padding: 15px; }
+            .header-section { flex-direction: column; }
+            .header-actions { width: 100%; justify-content: flex-start; }
+            th, td { padding: 8px 10px; font-size: 14px; }
+            .info-label { width: 100px; }
+        }
     </style>
 </head>
 <body>
@@ -218,7 +202,7 @@ if (isset($_SESSION['member_loggedin'])) {
         <?php endif; ?>
 
         <div class="header-section">
-            <div style="width: 100%;">
+            <div style="flex: 1;">
                 <h2 style="margin-top:0; color:#333;">Member Basic Information</h2>
                 <div class="info-grid">
                     <div class="info-column">
@@ -271,8 +255,8 @@ if (isset($_SESSION['member_loggedin'])) {
             <table>
                 <thead>
                     <tr>
-                        <th width="5%">No.</th>
-                        <th width="12%">Submission Date</th>
+                        <th>No.</th>
+                        <th>Submission Date</th>
                         <th>Share</th>
                         <th>Deposit</th>
                         
@@ -302,7 +286,7 @@ if (isset($_SESSION['member_loggedin'])) {
                     $grand_total_calculated = 0;
                     
                     if (empty($details_data)): ?>
-                        <tr><td colspan="10" style="text-align:center;">No records found.</td></tr>
+                        <tr><td colspan="<?php echo $show_service_charge ? '12' : '10'; ?>" style="text-align:center;">No records found.</td></tr>
                     <?php else: ?>
                         <?php foreach($details_data as $row): 
                             $row_share_deposit = $row['Share'] + $row['Deposit'];
@@ -366,10 +350,10 @@ if (isset($_SESSION['member_loggedin'])) {
 <?php endif; ?>
 
 <script>
-// Close modal if clicked outside
 window.onclick = function(event) {
-    if (event.target == document.getElementById('passModal')) {
-        document.getElementById('passModal').style.display = "none";
+    var modal = document.getElementById('passModal');
+    if (event.target == modal) {
+        modal.style.display = "none";
     }
 }
 </script>
