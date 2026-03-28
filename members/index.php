@@ -151,8 +151,8 @@ $conn->close();
             background-color: #dc3545; color: white; padding: 8px 20px;
             text-decoration: none; border-radius: 4px; font-size: 14px;
         }
-        .photo-container { width: 120px; height: 120px; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; border: 2px solid #dee2e6; background: #e9ecef; }
-        .photo-container img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .photo-container { width: 120px; height: 160px; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; border: 2px solid #dee2e6; background: #e9ecef; }
+        .photo-container img { width: 100%; height: 100%; object-fit: contain; display: block; }
         .photo-container .photo-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: white; text-align: center; padding: 5px 0; font-size: 11px; opacity: 0; transition: opacity 0.2s; }
         .photo-container:hover .photo-overlay { opacity: 1; }
         .photo-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }

@@ -73,12 +73,20 @@ if (!$src) {
 
 $w = imagesx($src);
 $h = imagesy($src);
-$min = min($w, $h);
-$x = intval(($w - $min) / 2);
-$y = intval(($h - $min) / 2);
 
-$dst = imagecreatetruecolor(300, 300);
-imagecopyresampled($dst, $src, 0, 0, $x, $y, 300, 300, $min, $min);
+$max_w = 600;
+$max_h = 800;
+ 
+$ratio = min($max_w / $w, $max_h / $h);
+$new_w = round($w * $ratio);
+$new_h = round($h * $ratio);
+
+$dst = imagecreatetruecolor($new_w, $new_h);
+ 
+$white = imagecolorallocate($dst, 255, 255, 255);
+imagefill($dst, 0, 0, $white);
+
+imagecopyresampled($dst, $src, 0, 0, 0, 0, $new_w, $new_h, $w, $h);
 
 $safe_id = strtoupper(preg_replace('/[^a-zA-Z0-9_\-]/', '', $member_id));
 $filepath = $upload_dir . $safe_id . '.jpg';

@@ -226,7 +226,7 @@ if($table_exists) {
     .member-fields p { margin: 10px 0; line-height: 1.6; display: flex; align-items: center; }
     .member-fields strong { color: #444; width: 150px; display: inline-block; flex-shrink: 0; }
     .member-photo-section { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-    .photo-container { width: 140px; height: 140px; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; border: 2px solid #dee2e6; background: #e9ecef; }
+    .photo-container { width: 150px; height: 200px; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; border: 2px solid #dee2e6; background: #e9ecef; }
     .photo-container img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .photo-container .photo-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: white; text-align: center; padding: 6px 0; font-size: 12px; opacity: 0; transition: opacity 0.2s; }
     .photo-container:hover .photo-overlay { opacity: 1; }
