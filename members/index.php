@@ -65,6 +65,9 @@ $totals = [
     'Soil_Test' => 0, 'Boundary' => 0, 'Others' => 0, 'Total' => 0
 ];
 
+$photo_url = '';
+$photo_exists = false;
+
 if (isset($_SESSION['member_loggedin'])) {
     $member_id = $_SESSION['member_id'];
 
@@ -73,6 +76,11 @@ if (isset($_SESSION['member_loggedin'])) {
     $stmt->execute();
     $basic_result = $stmt->get_result();
     $member_data = $basic_result->fetch_assoc();
+
+    $safe_member_id = strtoupper(preg_replace('/[^a-zA-Z0-9_\-]/', '', $member_id));
+    $photo_path = dirname(__DIR__) . '/uploads/members/' . $safe_member_id . '.jpg';
+    $photo_exists = file_exists($photo_path);
+    $photo_url = $photo_exists ? '../uploads/members/' . $safe_member_id . '.jpg?t=' . filemtime($photo_path) : '';
 
     if ($member_data) {
         $table_name = strtoupper(str_replace('-', '_', $member_id));
@@ -133,14 +141,23 @@ $conn->close();
         .success { color: #28a745; text-align: center; margin-bottom: 15px; padding: 10px; background: #d4edda; border-radius: 4px; }
         .dashboard-container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .header-section { border-bottom: 2px solid #007bff; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 15px; }
+        .header-info-area { flex: 1; min-width: 0; }
         .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
         .info-item { margin-bottom: 10px; }
         .info-label { font-weight: bold; color: #555; width: 120px; display: inline-block; }
+        .header-right { display: flex; flex-direction: column; align-items: center; gap: 12px; flex-shrink: 0; }
         .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         .logout-btn {
             background-color: #dc3545; color: white; padding: 8px 20px;
             text-decoration: none; border-radius: 4px; font-size: 14px;
         }
+        .photo-container { width: 120px; height: 120px; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; border: 2px solid #dee2e6; background: #e9ecef; }
+        .photo-container img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .photo-container .photo-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: white; text-align: center; padding: 5px 0; font-size: 11px; opacity: 0; transition: opacity 0.2s; }
+        .photo-container:hover .photo-overlay { opacity: 1; }
+        .photo-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        .photo-placeholder svg { width: 60%; height: 60%; fill: #adb5bd; }
+        .photo-uploading { opacity: 0.5; pointer-events: none; }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
         .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 300px; border-radius: 8px; }
         .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
@@ -161,10 +178,13 @@ $conn->close();
         @media screen and (max-width: 768px) {
             body { padding: 10px; }
             .dashboard-container { padding: 15px; }
-            .header-section { flex-direction: column; }
-            .header-actions { width: 100%; justify-content: flex-start; }
+            .header-section { flex-direction: column; align-items: center; }
+            .header-right { width: 100%; flex-direction: row; justify-content: space-between; align-items: center; }
+            .header-actions { width: auto; justify-content: flex-end; }
+            .header-info-area { width: 100%; }
             th, td { padding: 8px 10px; font-size: 14px; }
             .info-label { width: 100px; }
+            .photo-container { width: 80px; height: 80px; }
         }
     </style>
 </head>
@@ -202,7 +222,7 @@ $conn->close();
         <?php endif; ?>
 
         <div class="header-section">
-            <div style="flex: 1;">
+            <div class="header-info-area">
                 <h2 style="margin-top:0; color:#333;">Member Basic Information</h2>
                 <div class="info-grid">
                     <div class="info-column">
@@ -227,9 +247,23 @@ $conn->close();
                 </div>
             </div>
             
-            <div class="header-actions">
-                <button onclick="document.getElementById('passModal').style.display='block'" class="btn-secondary">Change Password</button>
-                <a href="?logout" class="logout-btn">Log Out</a>
+            <div class="header-right">
+                <div class="photo-container" id="photoContainer" onclick="document.getElementById('photoInput').click()">
+                    <?php if ($photo_exists): ?>
+                        <img id="memberPhoto" src="<?php echo $photo_url; ?>" alt="Member Photo">
+                    <?php else: ?>
+                        <div class="photo-placeholder" id="photoPlaceholder">
+                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="8" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></svg>
+                        </div>
+                        <img id="memberPhoto" src="" alt="Member Photo" style="display:none;">
+                    <?php endif; ?>
+                    <div class="photo-overlay">Change Photo</div>
+                </div>
+                <input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="uploadPhoto(this)">
+                <div class="header-actions">
+                    <button onclick="document.getElementById('passModal').style.display='block'" class="btn-secondary">Change Password</button>
+                    <a href="?logout" class="logout-btn">Log Out</a>
+                </div>
             </div>
         </div>
 
@@ -352,9 +386,48 @@ $conn->close();
 <script>
 window.onclick = function(event) {
     var modal = document.getElementById('passModal');
-    if (event.target == modal) {
+    if (modal && event.target == modal) {
         modal.style.display = "none";
     }
+}
+
+function uploadPhoto(input) {
+    if (!input.files || !input.files[0]) return;
+
+    var file = input.files[0];
+    if (file.size > 2 * 1024 * 1024) {
+        alert('File too large. Max 2MB.');
+        input.value = '';
+        return;
+    }
+
+    var container = document.getElementById('photoContainer');
+    container.classList.add('photo-uploading');
+
+    var fd = new FormData();
+    fd.append('photo', file);
+    fd.append('member_id', '<?php echo isset($safe_member_id) ? $safe_member_id : ''; ?>');
+
+    fetch('../upload_member_image.php', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            container.classList.remove('photo-uploading');
+            if (data.success) {
+                var img = document.getElementById('memberPhoto');
+                img.src = '../' + data.path;
+                img.style.display = 'block';
+                var ph = document.getElementById('photoPlaceholder');
+                if (ph) ph.style.display = 'none';
+            } else {
+                alert(data.message || 'Upload failed');
+            }
+        })
+        .catch(function(err) {
+            container.classList.remove('photo-uploading');
+            alert('Upload error: ' + err.message);
+        });
+
+    input.value = '';
 }
 </script>
 

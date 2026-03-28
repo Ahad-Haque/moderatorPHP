@@ -164,6 +164,11 @@ if($member_data['resign_date']) {
     $show_service_charge = ($duration < 5);
 }
 
+$safe_member_id = strtoupper(preg_replace('/[^a-zA-Z0-9_\-]/', '', $member_id));
+$photo_file = 'uploads/members/' . $safe_member_id . '.jpg';
+$photo_exists = file_exists($photo_file);
+$photo_url = $photo_exists ? $photo_file . '?t=' . filemtime($photo_file) : '';
+
 if (isset($_GET['action']) && $_GET['action'] === 'delete') {
     ob_clean();
     $conn->begin_transaction();
@@ -180,6 +185,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete') {
 
         $drop_table_sql = "DROP TABLE IF EXISTS $table_name";
         $conn->query($drop_table_sql);
+
+        $photo_path = 'uploads/members/' . $safe_member_id . '.jpg';
+        if (file_exists($photo_path)) {
+            unlink($photo_path);
+        }
         
         $conn->commit();
         header('Content-Type: application/json');
@@ -211,8 +221,17 @@ if($table_exists) {
     tr:hover { background-color: #f5f5f5; }
     .member-details { background-color: white; border: 1px solid #ddd; border-radius: 4px; padding: 25px; margin: 20px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .member-details h3 { margin-top: 0; color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; margin-bottom: 20px; }
-    .member-details p { margin: 10px 0; line-height: 1.6; display: flex; align-items: center; } 
-    .member-details strong { color: #444; width: 150px; display: inline-block; }
+    .member-info-layout { display: flex; gap: 25px; align-items: flex-start; }
+    .member-fields { flex: 1; min-width: 0; }
+    .member-fields p { margin: 10px 0; line-height: 1.6; display: flex; align-items: center; }
+    .member-fields strong { color: #444; width: 150px; display: inline-block; flex-shrink: 0; }
+    .member-photo-section { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .photo-container { width: 140px; height: 140px; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; border: 2px solid #dee2e6; background: #e9ecef; }
+    .photo-container img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .photo-container .photo-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: white; text-align: center; padding: 6px 0; font-size: 12px; opacity: 0; transition: opacity 0.2s; }
+    .photo-container:hover .photo-overlay { opacity: 1; }
+    .photo-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+    .photo-placeholder svg { width: 70%; height: 70%; fill: #adb5bd; }
     input[type="date"], input[type="number"], select, input[type="text"] { padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
     input[type="number"]:focus, input[type="date"]:focus, select:focus, input[type="text"]:focus { border-color: #007bff; outline: none; box-shadow: 0 0 5px rgba(0,123,255,0.2); }
     .add-row { background-color: #f8f9fa; border: 2px dashed #007bff; color: #007bff; padding: 15px; margin: 20px 0; border-radius: 4px; cursor: pointer; text-align: center; font-size: 18px; transition: all 0.3s ease; }
@@ -240,19 +259,23 @@ if($table_exists) {
     .editable-field.active { display: inline-block; }
     .field-text.hidden { display: none; }
     .btn-group { float: right; }
+    .photo-uploading { opacity: 0.5; pointer-events: none; }
     @media screen and (max-width: 768px) {
-        .member-details p { flex-direction: column; align-items: flex-start; }
-        .member-details strong { width: 100%; margin-bottom: 5px; }
+        .member-info-layout { flex-direction: column-reverse; }
+        .member-photo-section { align-self: center; }
+        .member-fields p { flex-direction: column; align-items: flex-start; }
+        .member-fields strong { width: 100%; margin-bottom: 5px; }
         .editable-field { width: 100%; }
         .btn-group { float: none; display: flex; gap: 10px; margin-bottom: 15px; }
         .print-btn, .edit-btn { float: none; margin: 0; }
     }
     @media screen and (max-width: 1024px) { .member-details { padding: 15px; } th, td { padding: 8px; } }
     @media print {
-        .back-btn, .print-btn, .edit-btn, .add-row, .update-btn, .delete-btn, .status-select, .password-row, .editable-field, .btn-group { display: none !important; }
+        .back-btn, .print-btn, .edit-btn, .add-row, .update-btn, .delete-btn, .status-select, .password-row, .editable-field, .btn-group, .photo-overlay { display: none !important; }
         .field-text { display: inline !important; }
         .print-status-text { display: inline-block !important; }
         .logout-btn, .page-link { display: none !important; }
+        .photo-container { cursor: default; border-color: #ccc; }
         body { padding: 0; margin: 0; }
         .member-details, .container { padding: 10px; margin: 0; box-shadow: none; }
         table { width: 100%; page-break-inside: auto; border-collapse: collapse; box-shadow: none; }
@@ -275,7 +298,7 @@ if($table_exists) {
     .print-status-text { display: none; }
 </style>
 
-<a href="moderator.php?module=userDetails" class="back-btn">← Back</a>
+<a href="moderator.php?module=userDetails" class="back-btn">&larr; Back</a>
 <button class="delete-btn" onclick="confirmDelete()">Delete Member</button>
 
 <form id="detailsForm" method="POST">
@@ -283,70 +306,89 @@ if($table_exists) {
 
 <div class="member-details">
     <h3>Member Basic Information</h3>
-    <div class="btn-group">
-        <button type="button" onclick="window.print()" class="print-btn">Print</button>
-        <button type="button" onclick="toggleEditMode()" class="edit-btn" id="editBtn">Edit</button>
-    </div>
-    
-    <p><strong>ID:</strong> <span><?php echo htmlspecialchars($member_data['id_no']); ?></span></p>
-    
-    <p>
-        <strong>Name:</strong> 
-        <span class="field-text" data-field="name"><?php echo htmlspecialchars($member_data['name']); ?></span>
-        <input type="text" name="edit_name" class="editable-field" data-field="name" value="<?php echo htmlspecialchars($member_data['name']); ?>">
-    </p>
-    
-    <p>
-        <strong>Designation:</strong> 
-        <span class="field-text" data-field="designation"><?php echo htmlspecialchars($member_data['designation']); ?></span>
-        <input type="text" name="edit_designation" class="editable-field" data-field="designation" value="<?php echo htmlspecialchars($member_data['designation']); ?>">
-    </p>
-    
-    <p>
-        <strong>Father's Name:</strong> 
-        <span class="field-text" data-field="fathers_name"><?php echo htmlspecialchars($member_data['fathers_name']); ?></span>
-        <input type="text" name="edit_fathers_name" class="editable-field" data-field="fathers_name" value="<?php echo htmlspecialchars($member_data['fathers_name']); ?>">
-    </p>
-    
-    <p>
-        <strong>Address:</strong> 
-        <span class="field-text" data-field="address"><?php echo htmlspecialchars($member_data['address']); ?></span>
-        <input type="text" name="edit_address" class="editable-field" data-field="address" value="<?php echo htmlspecialchars($member_data['address']); ?>">
-    </p>
-    
-    <p>
-        <strong>Mobile No:</strong> 
-        <span class="field-text" data-field="mobile_no"><?php echo htmlspecialchars($member_data['mobile_no']); ?></span>
-        <input type="text" name="edit_mobile_no" class="editable-field" data-field="mobile_no" value="<?php echo htmlspecialchars($member_data['mobile_no']); ?>">
-    </p>
-    
-    <p>
-        <strong>Admit Date:</strong> 
-        <span class="field-text" data-field="admit_date"><?php echo htmlspecialchars($member_data['admit_date']); ?></span>
-        <input type="date" name="edit_admit_date" class="editable-field" data-field="admit_date" value="<?php echo htmlspecialchars($member_data['admit_date']); ?>">
-    </p>
-    
-    <p>
-        <strong>Status:</strong> 
-        <span class="status-container">
-            <select name="resign_status" id="resignStatus" class="status-select" onchange="toggleStatusDate()">
-                <option value="active" <?php echo $member_data['resign_date'] ? '' : 'selected'; ?>>Active</option>
-                <option value="retired" <?php echo $member_data['resign_date'] ? 'selected' : ''; ?>>Retired</option>
-            </select>
-            <span id="dateContainer" style="display: <?php echo $member_data['resign_date'] ? 'inline' : 'none'; ?>;">
-                on 
-                <input type="date" name="resign_date" id="resignDate" value="<?php echo $member_data['resign_date'] ? $member_data['resign_date'] : ''; ?>">
-            </span>
-        </span>
-        <span class="print-status-text">
-            <?php echo $member_data['resign_date'] ? 'Resigned on ' . htmlspecialchars($member_data['resign_date']) : 'Active'; ?>
-        </span>
-    </p>
+    <div class="member-info-layout">
+        <div class="member-fields">
+            <div class="btn-group">
+                <button type="button" onclick="window.print()" class="print-btn">Print</button>
+                <button type="button" onclick="toggleEditMode()" class="edit-btn" id="editBtn">Edit</button>
+            </div>
+            
+            <p><strong>ID:</strong> <span><?php echo htmlspecialchars($member_data['id_no']); ?></span></p>
+            
+            <p>
+                <strong>Name:</strong> 
+                <span class="field-text" data-field="name"><?php echo htmlspecialchars($member_data['name']); ?></span>
+                <input type="text" name="edit_name" class="editable-field" data-field="name" value="<?php echo htmlspecialchars($member_data['name']); ?>">
+            </p>
+            
+            <p>
+                <strong>Designation:</strong> 
+                <span class="field-text" data-field="designation"><?php echo htmlspecialchars($member_data['designation']); ?></span>
+                <input type="text" name="edit_designation" class="editable-field" data-field="designation" value="<?php echo htmlspecialchars($member_data['designation']); ?>">
+            </p>
+            
+            <p>
+                <strong>Father's Name:</strong> 
+                <span class="field-text" data-field="fathers_name"><?php echo htmlspecialchars($member_data['fathers_name']); ?></span>
+                <input type="text" name="edit_fathers_name" class="editable-field" data-field="fathers_name" value="<?php echo htmlspecialchars($member_data['fathers_name']); ?>">
+            </p>
+            
+            <p>
+                <strong>Address:</strong> 
+                <span class="field-text" data-field="address"><?php echo htmlspecialchars($member_data['address']); ?></span>
+                <input type="text" name="edit_address" class="editable-field" data-field="address" value="<?php echo htmlspecialchars($member_data['address']); ?>">
+            </p>
+            
+            <p>
+                <strong>Mobile No:</strong> 
+                <span class="field-text" data-field="mobile_no"><?php echo htmlspecialchars($member_data['mobile_no']); ?></span>
+                <input type="text" name="edit_mobile_no" class="editable-field" data-field="mobile_no" value="<?php echo htmlspecialchars($member_data['mobile_no']); ?>">
+            </p>
+            
+            <p>
+                <strong>Admit Date:</strong> 
+                <span class="field-text" data-field="admit_date"><?php echo htmlspecialchars($member_data['admit_date']); ?></span>
+                <input type="date" name="edit_admit_date" class="editable-field" data-field="admit_date" value="<?php echo htmlspecialchars($member_data['admit_date']); ?>">
+            </p>
+            
+            <p>
+                <strong>Status:</strong> 
+                <span class="status-container">
+                    <select name="resign_status" id="resignStatus" class="status-select" onchange="toggleStatusDate()">
+                        <option value="active" <?php echo $member_data['resign_date'] ? '' : 'selected'; ?>>Active</option>
+                        <option value="retired" <?php echo $member_data['resign_date'] ? 'selected' : ''; ?>>Retired</option>
+                    </select>
+                    <span id="dateContainer" style="display: <?php echo $member_data['resign_date'] ? 'inline' : 'none'; ?>;">
+                        on 
+                        <input type="date" name="resign_date" id="resignDate" value="<?php echo $member_data['resign_date'] ? $member_data['resign_date'] : ''; ?>">
+                    </span>
+                </span>
+                <span class="print-status-text">
+                    <?php echo $member_data['resign_date'] ? 'Resigned on ' . htmlspecialchars($member_data['resign_date']) : 'Active'; ?>
+                </span>
+            </p>
 
-    <p class="password-row" id="passwordRow" style="display: <?php echo $member_data['resign_date'] ? 'none' : 'flex'; ?>;">
-        <strong>Set Password:</strong>
-        <input type="text" name="set_password" class="password-input" placeholder="Set/Update Password" autocomplete="off" value="<?php echo htmlspecialchars($current_password); ?>">
-    </p>
+            <p class="password-row" id="passwordRow" style="display: <?php echo $member_data['resign_date'] ? 'none' : 'flex'; ?>;">
+                <strong>Set Password:</strong>
+                <input type="text" name="set_password" class="password-input" placeholder="Set/Update Password" autocomplete="off" value="<?php echo htmlspecialchars($current_password); ?>">
+            </p>
+        </div>
+
+        <div class="member-photo-section">
+            <div class="photo-container" id="photoContainer" onclick="document.getElementById('photoInput').click()">
+                <?php if ($photo_exists): ?>
+                    <img id="memberPhoto" src="<?php echo $photo_url; ?>" alt="Member Photo">
+                <?php else: ?>
+                    <div class="photo-placeholder" id="photoPlaceholder">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="8" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></svg>
+                    </div>
+                    <img id="memberPhoto" src="" alt="Member Photo" style="display:none;">
+                <?php endif; ?>
+                <div class="photo-overlay">Change Photo</div>
+            </div>
+            <input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="uploadPhoto(this)">
+        </div>
+    </div>
 </div>
 
     <table>
@@ -433,29 +475,69 @@ if($table_exists) {
 let isEditMode = false;
 let originalValues = {};
 
+function uploadPhoto(input) {
+    if (!input.files || !input.files[0]) return;
+    
+    var file = input.files[0];
+    if (file.size > 2 * 1024 * 1024) {
+        alert('File too large. Max 2MB.');
+        input.value = '';
+        return;
+    }
+
+    var container = document.getElementById('photoContainer');
+    container.classList.add('photo-uploading');
+
+    var fd = new FormData();
+    fd.append('photo', file);
+    fd.append('member_id', '<?php echo $safe_member_id; ?>');
+    fd.append('sid', '<?php echo session_id(); ?>');
+
+    fetch('upload_member_image.php', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            container.classList.remove('photo-uploading');
+            if (data.success) {
+                var img = document.getElementById('memberPhoto');
+                img.src = data.path;
+                img.style.display = 'block';
+                var ph = document.getElementById('photoPlaceholder');
+                if (ph) ph.style.display = 'none';
+            } else {
+                alert(data.message || 'Upload failed');
+            }
+        })
+        .catch(function(err) {
+            container.classList.remove('photo-uploading');
+            alert('Upload error: ' + err.message);
+        });
+
+    input.value = '';
+}
+
 function toggleEditMode() {
-    const editBtn = document.getElementById('editBtn');
-    const fields = document.querySelectorAll('.editable-field');
-    const texts = document.querySelectorAll('.field-text');
+    var editBtn = document.getElementById('editBtn');
+    var fields = document.querySelectorAll('.editable-field');
+    var texts = document.querySelectorAll('.field-text');
     
     isEditMode = !isEditMode;
     
     if (isEditMode) {
-        fields.forEach(field => {
-            const fieldName = field.getAttribute('data-field');
+        fields.forEach(function(field) {
+            var fieldName = field.getAttribute('data-field');
             originalValues[fieldName] = field.value;
             field.classList.add('active');
         });
-        texts.forEach(text => text.classList.add('hidden'));
+        texts.forEach(function(text) { text.classList.add('hidden'); });
         editBtn.textContent = 'Cancel Edit';
         editBtn.classList.add('cancel');
     } else {
-        fields.forEach(field => {
-            const fieldName = field.getAttribute('data-field');
+        fields.forEach(function(field) {
+            var fieldName = field.getAttribute('data-field');
             field.value = originalValues[fieldName] || field.value;
             field.classList.remove('active');
         });
-        texts.forEach(text => text.classList.remove('hidden'));
+        texts.forEach(function(text) { text.classList.remove('hidden'); });
         editBtn.textContent = 'Edit';
         editBtn.classList.remove('cancel');
         document.getElementById('updateBasicInfo').value = '0';
@@ -464,31 +546,26 @@ function toggleEditMode() {
 
 function checkBasicInfoChanges() {
     if (!isEditMode) return false;
-    
-    const fields = document.querySelectorAll('.editable-field');
-    let hasChanges = false;
-    
-    fields.forEach(field => {
-        const fieldName = field.getAttribute('data-field');
-        if (field.value !== originalValues[fieldName]) {
-            hasChanges = true;
-        }
+    var fields = document.querySelectorAll('.editable-field');
+    var hasChanges = false;
+    fields.forEach(function(field) {
+        var fieldName = field.getAttribute('data-field');
+        if (field.value !== originalValues[fieldName]) hasChanges = true;
     });
-    
     return hasChanges;
 }
 
-document.getElementById('detailsForm').addEventListener('submit', function(e) {
+document.getElementById('detailsForm').addEventListener('submit', function() {
     if (isEditMode && checkBasicInfoChanges()) {
         document.getElementById('updateBasicInfo').value = '1';
     }
 });
 
 function toggleStatusDate() {
-    const status = document.getElementById('resignStatus').value;
-    const dateContainer = document.getElementById('dateContainer');
-    const dateInput = document.getElementById('resignDate');
-    const passwordRow = document.getElementById('passwordRow');
+    var status = document.getElementById('resignStatus').value;
+    var dateContainer = document.getElementById('dateContainer');
+    var dateInput = document.getElementById('resignDate');
+    var passwordRow = document.getElementById('passwordRow');
     
     if (status === 'retired') {
         dateContainer.style.display = 'inline';
@@ -503,27 +580,25 @@ function toggleStatusDate() {
 }
 
 function addNewRow() {
-    const tbody = document.getElementById('detailsTableBody');
-    const newRow = document.createElement('tr');
-    const rowIndex = 'new_' + Date.now();
-    const isResigned = document.querySelector('.service-charge') !== null;
+    var tbody = document.getElementById('detailsTableBody');
+    var newRow = document.createElement('tr');
+    var rowIndex = 'new_' + Date.now();
+    var isResigned = document.querySelector('.service-charge') !== null;
     
-    let rowHTML = `
-        <td>New<input type="hidden" name="rows[${rowIndex}][No]" value=""></td>
-        <td><input type="date" name="rows[${rowIndex}][Submission_Date]" required></td>
-        <td><input type="number" step="0.01" name="rows[${rowIndex}][Share]" value="0.00" oninput="calculateTotal(this)"></td>
-        <td><input type="number" step="0.01" name="rows[${rowIndex}][Deposit]" value="0.00" oninput="calculateTotal(this)"></td>`;
+    var rowHTML = '<td>New<input type="hidden" name="rows[' + rowIndex + '][No]" value=""></td>' +
+        '<td><input type="date" name="rows[' + rowIndex + '][Submission_Date]" required></td>' +
+        '<td><input type="number" step="0.01" name="rows[' + rowIndex + '][Share]" value="0.00" oninput="calculateTotal(this)"></td>' +
+        '<td><input type="number" step="0.01" name="rows[' + rowIndex + '][Deposit]" value="0.00" oninput="calculateTotal(this)"></td>';
         
     if (isResigned && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
-        rowHTML += `<td class="service-charge">0.00</td><td class="total-receivable">0.00</td>`;
+        rowHTML += '<td class="service-charge">0.00</td><td class="total-receivable">0.00</td>';
     }
     
-    rowHTML += `
-        <td><input type="number" step="0.01" name="rows[${rowIndex}][Land_Advance]" value="0.00" oninput="calculateTotal(this)"></td>
-        <td><input type="number" step="0.01" name="rows[${rowIndex}][Soil_Test]" value="0.00" oninput="calculateTotal(this)"></td>
-        <td><input type="number" step="0.01" name="rows[${rowIndex}][Boundary]" value="0.00" oninput="calculateTotal(this)"></td>
-        <td><input type="number" step="0.01" name="rows[${rowIndex}][Others]" value="0.00" oninput="calculateTotal(this)"></td>
-        <td class="total">0.00</td>`;
+    rowHTML += '<td><input type="number" step="0.01" name="rows[' + rowIndex + '][Land_Advance]" value="0.00" oninput="calculateTotal(this)"></td>' +
+        '<td><input type="number" step="0.01" name="rows[' + rowIndex + '][Soil_Test]" value="0.00" oninput="calculateTotal(this)"></td>' +
+        '<td><input type="number" step="0.01" name="rows[' + rowIndex + '][Boundary]" value="0.00" oninput="calculateTotal(this)"></td>' +
+        '<td><input type="number" step="0.01" name="rows[' + rowIndex + '][Others]" value="0.00" oninput="calculateTotal(this)"></td>' +
+        '<td class="total">0.00</td>';
     
     newRow.innerHTML = rowHTML;
     tbody.appendChild(newRow);
@@ -531,26 +606,26 @@ function addNewRow() {
 }
 
 function calculateTotal(input) {
-    const row = input.closest('tr');
-    const getVal = (name) => {
-        const el = row.querySelector(`input[name$="[${name}]"]`);
+    var row = input.closest('tr');
+    var getVal = function(name) {
+        var el = row.querySelector('input[name$="[' + name + ']"]');
         return el ? (parseFloat(el.value) || 0) : 0;
     };
 
-    const shareValue = getVal('Share');
-    const depositValue = getVal('Deposit');
-    const landAdvValue = getVal('Land_Advance');
-    const soilTestValue = getVal('Soil_Test');
-    const boundaryValue = getVal('Boundary');
-    const othersValue = getVal('Others');
+    var shareValue = getVal('Share');
+    var depositValue = getVal('Deposit');
+    var landAdvValue = getVal('Land_Advance');
+    var soilTestValue = getVal('Soil_Test');
+    var boundaryValue = getVal('Boundary');
+    var othersValue = getVal('Others');
     
-    const serviceChargeCell = row.querySelector('.service-charge');
-    const totalReceivableCell = row.querySelector('.total-receivable');
-    let rowTotal = 0;
+    var serviceChargeCell = row.querySelector('.service-charge');
+    var totalReceivableCell = row.querySelector('.total-receivable');
+    var rowTotal = 0;
     
     if (serviceChargeCell && totalReceivableCell && <?php echo $show_service_charge ? 'true' : 'false' ?>) {
-        const serviceCharge = (shareValue + depositValue) * 0.2;
-        const totalReceivable = (shareValue + depositValue) - serviceCharge;
+        var serviceCharge = (shareValue + depositValue) * 0.2;
+        var totalReceivable = (shareValue + depositValue) - serviceCharge;
         serviceChargeCell.textContent = serviceCharge.toFixed(2);
         totalReceivableCell.textContent = totalReceivable.toFixed(2);
         rowTotal = totalReceivable + landAdvValue + soilTestValue + boundaryValue + othersValue;
@@ -563,13 +638,12 @@ function calculateTotal(input) {
 }
 
 function calculateColumnTotals() {
-    let shareTot = 0, depositTot = 0, landAdvTot = 0, soilTestTot = 0, boundaryTot = 0, othersTot = 0, grandTot = 0, serviceChargeTot = 0, totalReceivableTot = 0;
-
-    const rows = document.querySelectorAll('#detailsTableBody tr');
+    var shareTot = 0, depositTot = 0, landAdvTot = 0, soilTestTot = 0, boundaryTot = 0, othersTot = 0, grandTot = 0, serviceChargeTot = 0, totalReceivableTot = 0;
+    var rows = document.querySelectorAll('#detailsTableBody tr');
     
-    rows.forEach(row => {
-        const getVal = (name) => {
-            const el = row.querySelector(`input[name$="[${name}]"]`);
+    rows.forEach(function(row) {
+        var getVal = function(name) {
+            var el = row.querySelector('input[name$="[' + name + ']"]');
             return el ? (parseFloat(el.value) || 0) : 0;
         };
 
@@ -580,8 +654,8 @@ function calculateColumnTotals() {
         boundaryTot += getVal('Boundary');
         othersTot += getVal('Others');
         
-        const serviceChargeCell = row.querySelector('.service-charge');
-        const totalReceivableCell = row.querySelector('.total-receivable');
+        var serviceChargeCell = row.querySelector('.service-charge');
+        var totalReceivableCell = row.querySelector('.total-receivable');
         if (serviceChargeCell && totalReceivableCell) {
             serviceChargeTot += parseFloat(serviceChargeCell.textContent) || 0;
             totalReceivableTot += parseFloat(totalReceivableCell.textContent) || 0;
@@ -609,10 +683,10 @@ function calculateColumnTotals() {
 async function confirmDelete() {
     if (confirm('Are you sure you want to delete this member? This action cannot be undone!')) {
         try {
-            const urlParams = new URLSearchParams(window.location.search);
-            const memberId = urlParams.get('id');
+            var urlParams = new URLSearchParams(window.location.search);
+            var memberId = urlParams.get('id');
             
-            const response = await fetch(`moderator.php?module=memberAdvancedDetails&id=${memberId}&action=delete`, {
+            var response = await fetch('moderator.php?module=memberAdvancedDetails&id=' + memberId + '&action=delete', {
                 method: 'GET',
                 headers: { 'Accept': 'application/json' }
             });
@@ -629,8 +703,8 @@ async function confirmDelete() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('#detailsTableBody tr').forEach(row => {
-        const firstInput = row.querySelector('input[type="number"]');
+    document.querySelectorAll('#detailsTableBody tr').forEach(function(row) {
+        var firstInput = row.querySelector('input[type="number"]');
         if (firstInput) calculateTotal(firstInput);
     });
     calculateColumnTotals();
